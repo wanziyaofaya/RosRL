@@ -1,0 +1,7 @@
+catkin_ws/build_isolated/
+catkin_ws/devel_isolated/
+catkin_ws/.catkin_workspace
+TD3/results/TD3_velodyne.npy
+
+TD3/runs/
+TD3/pytorch_models/TD3_velodyne_*.pth
