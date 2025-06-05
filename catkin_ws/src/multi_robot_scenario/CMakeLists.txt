@@ -7,6 +7,11 @@ project(multi_robot_scenario)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
+
+# 在 CMakeLists.txt 文件中设置 Python 解释器路径
+set(PythonInterp "/bin/python3" CACHE FILEPATH "Path to Python interpreter")
+set(PYTHON_EXECUTABLE "/bin/python3" CACHE FILEPATH "Path to Python executable")
+
 find_package(catkin REQUIRED COMPONENTS
   xacro
 )
