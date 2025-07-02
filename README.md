@@ -41,51 +41,45 @@ Main dependencies:
 
 Clone the repository:
 ```shell
-$ cd ~
+cd ~
 ### Clone this repo
-$ git clone https://github.com/wanziyaofaya/RosRL.git
+git clone https://github.com/wanziyaofaya/RosRL.git
 ```
 The network can be run with a standard 2D laser, but this implementation uses a simulated [3D Velodyne sensor](https://github.com/lmark1/velodyne_simulator)
 
 Compile the workspace:
 ```shell
-$ cd ~/RosRL/catkin_ws
+cd ~/RosRL/catkin_ws
 ### Compile
-$ catkin_make_isolated
+catkin_make_isolated
 ```
 
 Open a terminal and set up sources:
 ```shell
-$ export ROS_HOSTNAME=localhost
-$ export ROS_MASTER_URI=http://localhost:11311
-$ export ROS_PORT_SIM=11311
-$ export GAZEBO_RESOURCE_PATH=~/RosRL/catkin_ws/src/multi_robot_scenario/launch
-$ source ~/.bashrc
-$ cd ~/RosRL/catkin_ws
-$ source devel_isolated/setup.bash
+source env_init.bash
 ```
 
 Run the training:
 ```shell
-$ cd ~/RosRL/TD3
-$ python3 train_velodyne_td3.py
+cd ~/RosRL/TD3
+python3 train_velodyne_td3.py
 ```
 
 To check the training process on tensorboard:
 ```shell
-$ cd ~/RosRL/TD3
-$ tensorboard --logdir runs
+cd ~/RosRL/TD3
+tensorboard --logdir runs
 ```
 
 To kill the training process:
 ```shell
-$ killall -9 rosout roslaunch rosmaster gzserver nodelet robot_state_publisher gzclient python python3
+killall -9 rosout roslaunch rosmaster gzserver nodelet robot_state_publisher gzclient python python3
 ```
 
 Once training is completed, test the model:
 ```shell
-$ cd ~/RosRL/TD3
-$ python3 test_velodyne_td3.py
+cd ~/RosRL/TD3
+python3 test_velodyne_td3.py
 ```
 
 Gazebo environment:
