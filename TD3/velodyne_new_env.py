@@ -4,6 +4,7 @@ import random
 import subprocess
 import time
 from os import path
+import heapq
 
 import numpy as np
 import rospy
@@ -16,13 +17,14 @@ from squaternion import Quaternion
 from std_srvs.srv import Empty
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
+from scipy.ndimage import distance_transform_edt
 
 GOAL_REACHED_DIST = 0.3
 COLLISION_DIST = 0.35
 TIME_DELTA = 0.1
 
 
-# 检查(x, y)这个点是否在障碍物区域内，如果在障碍物上则返回False，否则返回True
+# 判断某个点（x,y）是否在障碍物区域或地图边界外
 def check_pos(x, y):
     goal_ok = True
 
@@ -61,24 +63,147 @@ def check_pos(x, y):
 
     return goal_ok
 
+# 构建栅格地图（带障碍物和障碍物距离信息）
+def build_grid_map(resolution=0.2, x_range=(-4.5, 4.5), y_range=(-4.5, 4.5)):
+    x_min, x_max = x_range
+    y_min, y_max = y_range
+    x_num = int((x_max - x_min) / resolution) + 1
+    y_num = int((y_max - y_min) / resolution) + 1
+    grid = np.zeros((x_num, y_num), dtype=np.int8)
+    for i in range(x_num):
+        for j in range(y_num):
+            x = x_min + i * resolution
+            y = y_min + j * resolution
+            if not check_pos(x, y):
+                grid[i, j] = 1  # 1表示障碍物
+    # 新增：计算每个格子到最近障碍物的距离（米）
+    obs_mask = (grid == 0).astype(np.uint8)
+    obs_dist = distance_transform_edt(obs_mask) * resolution # 每个格子到最近障碍物的距离
+    return grid, x_min, y_min, resolution, obs_dist
+
+
+def astar(grid, start, goal, obs_dist=None, alpha=2.0):
+    def heuristic(a, b):
+        base = np.linalg.norm(np.array(a) - np.array(b))
+        if obs_dist is not None:
+            d_obs = obs_dist[a[0], a[1]]
+            obs_penalty = alpha * (1.0 / (d_obs + 1e-3)) if d_obs < 1.0 else 0
+        else:
+            obs_penalty = 0
+        return base + obs_penalty
+
+    neighbors = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+    close_set = set()
+    came_from = {}
+    gscore = {start: 0}
+    fscore = {start: heuristic(start, goal)}
+    oheap = []
+    heapq.heappush(oheap, (fscore[start], start))
+    while oheap:
+        current = heapq.heappop(oheap)[1]
+        if current == goal:
+            data = []
+            while current in came_from:
+                data.append(current)
+                current = came_from[current]
+            data.append(start)
+            return data[::-1]
+        close_set.add(current)
+        for i, j in neighbors:
+            neighbor = (current[0] + i, current[1] + j)
+            tentative_g_score = gscore[current] + heuristic(current, neighbor)
+            if 0 <= neighbor[0] < grid.shape[0]:
+                if 0 <= neighbor[1] < grid.shape[1]:
+                    if grid[neighbor[0]][neighbor[1]] == 1:
+                        continue
+                else:
+                    continue
+            else:
+                continue
+            if neighbor in close_set and tentative_g_score >= gscore.get(neighbor, 0):
+                continue
+            if tentative_g_score < gscore.get(neighbor, float('inf')) or neighbor not in [i[1] for i in oheap]:
+                came_from[neighbor] = current
+                gscore[neighbor] = tentative_g_score
+                fscore[neighbor] = tentative_g_score + heuristic(neighbor, goal)
+                heapq.heappush(oheap, (fscore[neighbor], neighbor))
+    return []
+
+
+def bresenham_line(p1, p2):
+    # 返回p1到p2之间所有格子坐标（含首尾）
+    x0, y0 = p1
+    x1, y1 = p2
+    points = []
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    x, y = x0, y0
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    if dx > dy:
+        err = dx / 2.0
+        while x != x1:
+            points.append((x, y))
+            err -= dy
+            if err < 0:
+                y += sy
+                err += dx
+            x += sx
+    else:
+        err = dy / 2.0
+        while y != y1:
+            points.append((x, y))
+            err -= dx
+            if err < 0:
+                x += sx
+                err += dy
+            y += sy
+    points.append((x1, y1))
+    return points
+
+
+def is_line_free(grid, p1, p2):
+    # 检查p1到p2之间的格子是否都可通行
+    for x, y in bresenham_line(p1, p2):
+        if not (0 <= x < grid.shape[0] and 0 <= y < grid.shape[1]):
+            return False
+        if grid[x, y] == 1:
+            return False
+    return True
+
+
+def sparsify_path(grid, path):
+    if not path:
+        return []
+    new_path = [path[0]]
+    i = 0
+    while i < len(path) - 1:
+        j = len(path) - 1
+        while j > i + 1:
+            if is_line_free(grid, path[i], path[j]):
+                break
+            j -= 1
+        new_path.append(path[j])
+        i = j
+    return new_path
+
 
 class GazeboEnv:
     """Superclass for all Gazebo environments."""
 
     def __init__(self, launchfile, environment_dim):
-        self.environment_dim = environment_dim # 激光雷达数据维度
+        self.environment_dim = environment_dim
         self.odom_x = 0
         self.odom_y = 0
 
         self.goal_x = 1
         self.goal_y = 0.0
 
-        self.upper = 5.0 # 目标点随机生成的上界
-        self.lower = -5.0 # 目标点随机生成的下界
-        self.velodyne_data = np.ones(self.environment_dim) * 10 # 初始化激光雷达数据，每个扇区的距离都设为10米（表示很远，没有障碍物）
-        self.last_odom = None # 最近一次里程计数据
+        self.upper = 5.0
+        self.lower = -5.0
+        self.velodyne_data = np.ones(self.environment_dim) * 10
+        self.last_odom = None
 
-        # 初始化机器人模型状态
         self.set_self_state = ModelState()
         self.set_self_state.model_name = "r1"
         self.set_self_state.pose.position.x = 0.0
@@ -89,14 +214,12 @@ class GazeboEnv:
         self.set_self_state.pose.orientation.z = 0.0
         self.set_self_state.pose.orientation.w = 1.0
 
-        # 计算每个激光扇区的角度范围
         self.gaps = [[-np.pi / 2 - 0.03, -np.pi / 2 + np.pi / self.environment_dim]]
         for m in range(self.environment_dim - 1):
             self.gaps.append(
                 [self.gaps[m][1], self.gaps[m][1] + np.pi / self.environment_dim]
             )
         self.gaps[-1][-1] += 0.03
-
 
         port = "11311"
         subprocess.Popen(["roscore", "-p", port])
@@ -123,23 +246,28 @@ class GazeboEnv:
         self.unpause = rospy.ServiceProxy("/gazebo/unpause_physics", Empty)
         self.pause = rospy.ServiceProxy("/gazebo/pause_physics", Empty)
         self.reset_proxy = rospy.ServiceProxy("/gazebo/reset_world", Empty)
-        self.publisher = rospy.Publisher("goal_point", MarkerArray, queue_size=3) # 目标点可视化
-        self.publisher2 = rospy.Publisher("linear_velocity", MarkerArray, queue_size=1) # 线速度可视化
-        self.publisher3 = rospy.Publisher("angular_velocity", MarkerArray, queue_size=1) # 角速度可视化
+        self.publisher = rospy.Publisher("goal_point", MarkerArray, queue_size=3)
+        self.publisher2 = rospy.Publisher("linear_velocity", MarkerArray, queue_size=1)
+        self.publisher3 = rospy.Publisher("angular_velocity", MarkerArray, queue_size=1)
         self.velodyne = rospy.Subscriber(
             "/velodyne_points", PointCloud2, self.velodyne_callback, queue_size=1
-        ) # 激光点云
+        )
         self.odom = rospy.Subscriber(
             "/r1/odom", Odometry, self.odom_callback, queue_size=1
-        ) # 里程计
+        )
 
-    # 将点云数据分成多个扇区，每个扇区只保留最小距离（距离最近的障碍物的距离），作为状态输入
+        self.grid, self.x_min, self.y_min, self.grid_resolution, self.obs_dist = build_grid_map()
+        self.global_path = []
+        self.global_path_index = 0
+        self.local_goal = (self.goal_x, self.goal_y)
+
+    # Read velodyne pointcloud and turn it into distance data, then select the minimum value for each angle
+    # range as state representation
     def velodyne_callback(self, v):
-        # 处理激光点云数据，将其转为每个扇区的最小距离
         data = list(pc2.read_points(v, skip_nans=False, field_names=("x", "y", "z")))
         self.velodyne_data = np.ones(self.environment_dim) * 10
         for i in range(len(data)):
-            if data[i][2] > -0.2: # 只考虑地面以上的点
+            if data[i][2] > -0.2:
                 dot = data[i][0] * 1 + data[i][1] * 0
                 mag1 = math.sqrt(math.pow(data[i][0], 2) + math.pow(data[i][1], 2))
                 mag2 = math.sqrt(math.pow(1, 2) + math.pow(0, 2))
@@ -152,14 +280,34 @@ class GazeboEnv:
                         break
 
     def odom_callback(self, od_data):
-        self.last_odom = od_data # 保存最新的里程计数据
+        self.last_odom = od_data
 
+    def plan_global_path(self, start_xy, goal_xy):
+        def to_grid(x, y):
+            i = int((x - self.x_min) / self.grid_resolution)
+            j = int((y - self.y_min) / self.grid_resolution)
+            return (i, j)
 
+        def to_world(i, j):
+            x = self.x_min + i * self.grid_resolution
+            y = self.y_min + j * self.grid_resolution
+            return (x, y)
 
+        start_idx = to_grid(*start_xy)
+        goal_idx = to_grid(*goal_xy)
+        path_idx = astar(self.grid, start_idx, goal_idx, self.obs_dist)
+        # 可选：路径稀疏化，去除冗余节点
+        path_idx = sparsify_path(self.grid, path_idx)
+        if not path_idx:
+            return []
+        path_xy = [to_world(i, j) for i, j in path_idx]
+        return path_xy
+
+    # Perform an action and read a new state
     def step(self, action):
-        target = False # 标记是否到达目标点，初始为False
+        target = False
 
-        # 1. 发布机器人动作
+        # Publish the robot action
         vel_cmd = Twist()
         vel_cmd.linear.x = action[0]
         vel_cmd.angular.z = action[1]
@@ -172,7 +320,7 @@ class GazeboEnv:
         except (rospy.ServiceException) as e:
             print("/gazebo/unpause_physics service call failed")
 
-
+        # propagate state for TIME_DELTA seconds
         time.sleep(TIME_DELTA)
 
         rospy.wait_for_service("/gazebo/pause_physics")
@@ -182,13 +330,13 @@ class GazeboEnv:
         except (rospy.ServiceException) as e:
             print("/gazebo/pause_physics service call failed")
 
-        # 读取激光雷达数据，判断是否碰撞
-        done, collision, min_laser = self.observe_collision(self.velodyne_data) # 判断是否终止、是否碰撞、最小激光距离
+        # read velodyne laser state
+        done, collision, min_laser = self.observe_collision(self.velodyne_data)
         v_state = []
-        v_state[:] = self.velodyne_data[:] # 复制当前激光数据
-        laser_state = [v_state] # 包装成列表，便于后续拼接
+        v_state[:] = self.velodyne_data[:]
+        laser_state = [v_state]
 
-        # 读取机器人当前位置和朝向
+        # Calculate robot heading from odometry data
         self.odom_x = self.last_odom.pose.pose.position.x
         self.odom_y = self.last_odom.pose.pose.position.y
         quaternion = Quaternion(
@@ -200,11 +348,12 @@ class GazeboEnv:
         euler = quaternion.to_euler(degrees=False)
         angle = round(euler[2], 4)
 
+        # Calculate distance to the goal from the robot
         distance = np.linalg.norm(
             [self.odom_x - self.goal_x, self.odom_y - self.goal_y]
         )
 
-        # 计算机器人朝向与目标方向的夹角
+        # Calculate the relative angle between the robots heading and heading toward the goal
         skew_x = self.goal_x - self.odom_x
         skew_y = self.goal_y - self.odom_y
         dot = skew_x * 1 + skew_y * 0
@@ -224,17 +373,33 @@ class GazeboEnv:
             theta = -np.pi - theta
             theta = np.pi - theta
 
+        # 计算目标方向和机器人朝向的单位向量
+        goal_direction = np.array([skew_x, skew_y]) / (np.linalg.norm([skew_x, skew_y]) + 1e-8)
+        robot_heading = np.array([np.cos(angle), np.sin(angle)])
+
+        # Detect if the goal has been reached and give a large positive reward
         if distance < GOAL_REACHED_DIST:
             target = True
             done = True
 
-        robot_state = [distance, theta, action[0], action[1]] # 机器人状态：距离、角度、线速度、角速度
-        state = np.append(laser_state, robot_state) # 拼接激光数据和机器人状态，作为新状态
-        reward = self.get_reward(target, collision, action, min_laser) # 计算奖励
+        robot_state = [distance, theta, action[0], action[1]]
+        state = np.append(laser_state, robot_state)
+        # 加入A*启发值
+        astar_heuristic = self.compute_astar_heuristic(self.odom_x, self.odom_y, self.goal_x, self.goal_y)
+        state = np.append(state, astar_heuristic)
+       
+        reward = self.get_reward(target, collision, action, min_laser, goal_direction, robot_heading, distance)
+        # 动态切换局部目标点
+        local_goal_x, local_goal_y = self.local_goal
+        distance_to_local_goal = np.linalg.norm([self.odom_x - local_goal_x, self.odom_y - local_goal_y])
+        if distance_to_local_goal < 0.3 and self.global_path_index < len(self.global_path) - 1:
+            self.global_path_index += 1
+            self.local_goal = self.global_path[self.global_path_index]
         return state, reward, done, target
 
     def reset(self):
 
+        # Resets the state of the environment and returns an initial observation.
         rospy.wait_for_service("/gazebo/reset_world")
         try:
             self.reset_proxy()
@@ -255,8 +420,7 @@ class GazeboEnv:
             position_ok = check_pos(x, y)
         object_state.pose.position.x = x
         object_state.pose.position.y = y
-
-
+        # object_state.pose.position.z = 0.
         object_state.pose.orientation.x = quaternion.x
         object_state.pose.orientation.y = quaternion.y
         object_state.pose.orientation.z = quaternion.z
@@ -266,9 +430,16 @@ class GazeboEnv:
         self.odom_x = object_state.pose.position.x
         self.odom_y = object_state.pose.position.y
 
-
+        # set a random goal in empty space in environment
         self.change_goal()
-
+        # 生成全局路径并初始化局部目标点
+        self.global_path = self.plan_global_path((self.odom_x, self.odom_y), (self.goal_x, self.goal_y))
+        self.global_path_index = 1 if len(self.global_path) > 1 else 0
+        if self.global_path:
+            self.local_goal = self.global_path[self.global_path_index]
+        else:
+            self.local_goal = (self.goal_x, self.goal_y)
+        # randomly scatter boxes in the environment
         self.random_box()
         self.publish_markers([0.0, 0.0])
 
@@ -317,11 +488,14 @@ class GazeboEnv:
 
         robot_state = [distance, theta, 0.0, 0.0]
         state = np.append(laser_state, robot_state)
+        # === 新增：A*启发值 ===
+        astar_heuristic = self.compute_astar_heuristic(self.odom_x, self.odom_y, self.goal_x, self.goal_y)
+        state = np.append(state, astar_heuristic)
+        # === END ===
         return state
 
     def change_goal(self):
-        # 随机生成一个新的目标点，并确保它不会出现在障碍物上或地图外
-        # 同时随着训练进行，目标点的随机范围会逐渐扩大，让任务更有挑战性
+        # Place a new goal and check if its location is not on one of the obstacles
         if self.upper < 10:
             self.upper += 0.004
         if self.lower > -10:
@@ -333,8 +507,17 @@ class GazeboEnv:
             self.goal_x = self.odom_x + random.uniform(self.upper, self.lower)
             self.goal_y = self.odom_y + random.uniform(self.upper, self.lower)
             goal_ok = check_pos(self.goal_x, self.goal_y)
+        # 重新生成全局路径和局部目标点
+        self.global_path = self.plan_global_path((self.odom_x, self.odom_y), (self.goal_x, self.goal_y))
+        self.global_path_index = 1 if len(self.global_path) > 1 else 0
+        if self.global_path:
+            self.local_goal = self.global_path[self.global_path_index]
+        else:
+            self.local_goal = (self.goal_x, self.goal_y)
 
     def random_box(self):
+        # Randomly change the location of the boxes in the environment on each reset to randomize the training
+        # environment
         for i in range(4):
             name = "cardboard_box_" + str(i)
 
@@ -432,11 +615,78 @@ class GazeboEnv:
         return False, False, min_laser
 
     @staticmethod
-    def get_reward(target, collision, action, min_laser):
+    def get_reward(target, collision, action, min_laser, goal_direction, robot_heading, distance_to_goal):
         if target:
             return 100.0
         elif collision:
             return -100.0
         else:
-            r3 = lambda x: 1 - x if x < 1 else 0.0
-            return action[0] / 2 - abs(action[1]) / 2 - r3(min_laser) / 2
+            # cos(theta) 是动作是否朝向目标
+            cos_theta = np.dot(goal_direction, robot_heading)
+
+            forward_reward = action[0] * max(0, cos_theta)  # 只奖励正向前进
+            turn_penalty = abs(action[1])
+            laser_penalty = np.exp(-min_laser)
+            goal_penalty = 0.1 * distance_to_goal
+
+            reward = forward_reward - 0.5 * turn_penalty - 0.5 * laser_penalty - goal_penalty
+
+            # 加一条安全检查：速度太快但太近就惩罚
+            if min_laser < 0.5 and action[0] > 0.5:
+                reward -= 0.2
+
+            return reward
+
+    def compute_forward_obstacle_density(self, angle, d_thresh=10.0):
+        """
+        计算机器人前进方向±90°内的障碍物密度
+        angle: 机器人当前朝向（弧度）
+        d_thresh: 小于该距离视为有障碍物
+        返回：密度（0~1）
+        """
+        laser = np.array(self.velodyne_data)
+        num_rays = len(laser)
+        # 假设velodyne_data均匀分布在[-pi, pi]
+        angles = np.linspace(-np.pi, np.pi, num_rays, endpoint=False)
+        # 选取前进方向±90°的激光
+        mask = (angles >= angle - np.pi/2) & (angles <= angle + np.pi/2)
+        selected = laser[mask]
+        num_obstacle = np.sum(selected < d_thresh)
+        density = num_obstacle / selected.size if selected.size > 0 else 0
+        return density
+
+    def compute_astar_heuristic(self, x, y, goal_x, goal_y):
+        """
+        计算当前位置到目标点的A*启发值（障碍物距离加权欧氏距离+障碍物密度因子）
+        """
+        # 转为栅格坐标
+        i = int((x - self.x_min) / self.grid_resolution)
+        j = int((y - self.y_min) / self.grid_resolution)
+        gi = int((goal_x - self.x_min) / self.grid_resolution)
+        gj = int((goal_y - self.y_min) / self.grid_resolution)
+        # 欧氏距离
+        base = np.linalg.norm([i - gi, j - gj]) * self.grid_resolution
+        # 障碍物距离惩罚
+        if 0 <= i < self.obs_dist.shape[0] and 0 <= j < self.obs_dist.shape[1]:
+            d_obs = self.obs_dist[i, j]
+            obs_penalty = 2.0 * (1.0 / (d_obs + 1e-3)) if d_obs < 1.0 else 0
+        else:
+            obs_penalty = 0
+        # === 新增：障碍物密度因子 ===
+        if hasattr(self, "last_odom") and self.last_odom is not None:
+            quaternion = Quaternion(
+                self.last_odom.pose.pose.orientation.w,
+                self.last_odom.pose.pose.orientation.x,
+                self.last_odom.pose.pose.orientation.y,
+                self.last_odom.pose.pose.orientation.z,
+            )
+            euler = quaternion.to_euler(degrees=False)
+            angle = euler[2]
+            density = self.compute_forward_obstacle_density(angle)
+        else:
+            density = 0
+        density_penalty = 2.0 * density  # 系数可调
+        # === END ===
+        return base + obs_penalty + density_penalty
+
+

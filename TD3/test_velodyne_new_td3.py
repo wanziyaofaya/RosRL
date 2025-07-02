@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from velodyne_env import GazeboEnv
+from velodyne_new_env import GazeboEnv
 
 
 class Actor(nn.Module):
@@ -62,7 +62,7 @@ action_dim = 2
 # Create the network
 network = TD3(state_dim, action_dim)
 try:
-    network.load(file_name, "./pytorch_models-627")
+    network.load(file_name, "./pytorch_models")
 except:
     raise ValueError("Could not load the stored model parameters")
 

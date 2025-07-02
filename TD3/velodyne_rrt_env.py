@@ -4,6 +4,7 @@ import random
 import subprocess
 import time
 from os import path
+import heapq
 
 import numpy as np
 import rospy
@@ -16,13 +17,15 @@ from squaternion import Quaternion
 from std_srvs.srv import Empty
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
+from scipy.ndimage import distance_transform_edt
 
 GOAL_REACHED_DIST = 0.3
 COLLISION_DIST = 0.35
 TIME_DELTA = 0.1
+LOCAL_GOAL_REACHED_DIST = 0.5  # 新增局部目标点到达距离阈值
 
 
-# 检查(x, y)这个点是否在障碍物区域内，如果在障碍物上则返回False，否则返回True
+# 判断某个点（x,y）是否在障碍物区域或地图边界外
 def check_pos(x, y):
     goal_ok = True
 
@@ -61,24 +64,65 @@ def check_pos(x, y):
 
     return goal_ok
 
+# 实现 is_in_obstacle 函数
+# 判断点是否在障碍物内
+def is_in_obstacle(point):
+    x, y = point
+    return not check_pos(x, y)
+
+
+# 替换采样函数，直接使用 check_pos 判断点是否合法
+def sample_continuous(x_range=(-4.5, 4.5), y_range=(-4.5, 4.5), goal_sample_rate=0.3, goal=None):
+    while True:
+        if random.random() < goal_sample_rate and goal is not None:
+            return goal
+        x = random.uniform(x_range[0], x_range[1])
+        y = random.uniform(y_range[0], y_range[1])
+        if check_pos(x, y):
+            return (x, y)
+
+
+# 替换碰撞检测函数，直接使用 check_pos 判断路径是否碰撞
+def is_collision_free(from_point, to_point):
+    vec = np.array(to_point) - np.array(from_point)
+    dist = np.linalg.norm(vec)
+    direction = vec / (dist + 1e-8)
+    steps = int(dist / 0.1)  # 每 0.1 米检查一次
+    for i in range(steps + 1):
+        intermediate_point = np.array(from_point) + i * 0.1 * direction
+        if not check_pos(intermediate_point[0], intermediate_point[1]):
+            return False
+    return True
+
+
+# 替换steer函数，支持连续空间
+# 在连续空间中生成路径点
+def steer_continuous(from_point, to_point, step_size):
+    vec = np.array(to_point) - np.array(from_point)
+    dist = np.linalg.norm(vec)
+    if dist == 0:
+        return from_point
+    direction = vec / dist
+    new_pos = tuple(np.array(from_point) + direction * min(step_size, dist))
+    return new_pos
+
 
 class GazeboEnv:
     """Superclass for all Gazebo environments."""
 
     def __init__(self, launchfile, environment_dim):
-        self.environment_dim = environment_dim # 激光雷达数据维度
+        self.environment_dim = environment_dim
         self.odom_x = 0
         self.odom_y = 0
 
         self.goal_x = 1
         self.goal_y = 0.0
 
-        self.upper = 5.0 # 目标点随机生成的上界
-        self.lower = -5.0 # 目标点随机生成的下界
-        self.velodyne_data = np.ones(self.environment_dim) * 10 # 初始化激光雷达数据，每个扇区的距离都设为10米（表示很远，没有障碍物）
-        self.last_odom = None # 最近一次里程计数据
+        self.upper = 5.0
+        self.lower = -5.0
+        self.velodyne_data = np.ones(self.environment_dim) * 10
+        self.last_odom = None
 
-        # 初始化机器人模型状态
         self.set_self_state = ModelState()
         self.set_self_state.model_name = "r1"
         self.set_self_state.pose.position.x = 0.0
@@ -89,14 +133,12 @@ class GazeboEnv:
         self.set_self_state.pose.orientation.z = 0.0
         self.set_self_state.pose.orientation.w = 1.0
 
-        # 计算每个激光扇区的角度范围
         self.gaps = [[-np.pi / 2 - 0.03, -np.pi / 2 + np.pi / self.environment_dim]]
         for m in range(self.environment_dim - 1):
             self.gaps.append(
                 [self.gaps[m][1], self.gaps[m][1] + np.pi / self.environment_dim]
             )
         self.gaps[-1][-1] += 0.03
-
 
         port = "11311"
         subprocess.Popen(["roscore", "-p", port])
@@ -123,23 +165,33 @@ class GazeboEnv:
         self.unpause = rospy.ServiceProxy("/gazebo/unpause_physics", Empty)
         self.pause = rospy.ServiceProxy("/gazebo/pause_physics", Empty)
         self.reset_proxy = rospy.ServiceProxy("/gazebo/reset_world", Empty)
-        self.publisher = rospy.Publisher("goal_point", MarkerArray, queue_size=3) # 目标点可视化
-        self.publisher2 = rospy.Publisher("linear_velocity", MarkerArray, queue_size=1) # 线速度可视化
-        self.publisher3 = rospy.Publisher("angular_velocity", MarkerArray, queue_size=1) # 角速度可视化
+        self.publisher = rospy.Publisher("goal_point", MarkerArray, queue_size=3)
+        self.publisher2 = rospy.Publisher("linear_velocity", MarkerArray, queue_size=1)
+        self.publisher3 = rospy.Publisher("angular_velocity", MarkerArray, queue_size=1)
         self.velodyne = rospy.Subscriber(
             "/velodyne_points", PointCloud2, self.velodyne_callback, queue_size=1
-        ) # 激光点云
+        )
         self.odom = rospy.Subscriber(
             "/r1/odom", Odometry, self.odom_callback, queue_size=1
-        ) # 里程计
+        )
 
-    # 将点云数据分成多个扇区，每个扇区只保留最小距离（距离最近的障碍物的距离），作为状态输入
+        self.obstacles = None  # 不再需要 build_continuous_map
+        
+        self.global_path = []
+        self.global_path_index = 0
+        self.local_goal = (self.goal_x, self.goal_y)
+
+        self.dynamic_obstacles = []  # Initialize dynamic obstacles
+
+        self.goal = (self.goal_x, self.goal_y)  # 初始化全局目标点
+
+    # Read velodyne pointcloud and turn it into distance data, then select the minimum value for each angle
+    # range as state representation
     def velodyne_callback(self, v):
-        # 处理激光点云数据，将其转为每个扇区的最小距离
         data = list(pc2.read_points(v, skip_nans=False, field_names=("x", "y", "z")))
         self.velodyne_data = np.ones(self.environment_dim) * 10
         for i in range(len(data)):
-            if data[i][2] > -0.2: # 只考虑地面以上的点
+            if data[i][2] > -0.2:
                 dot = data[i][0] * 1 + data[i][1] * 0
                 mag1 = math.sqrt(math.pow(data[i][0], 2) + math.pow(data[i][1], 2))
                 mag2 = math.sqrt(math.pow(1, 2) + math.pow(0, 2))
@@ -152,14 +204,13 @@ class GazeboEnv:
                         break
 
     def odom_callback(self, od_data):
-        self.last_odom = od_data # 保存最新的里程计数据
+        self.last_odom = od_data
 
-
-
+    # Perform an action and read a new state
     def step(self, action):
-        target = False # 标记是否到达目标点，初始为False
+        target = False
 
-        # 1. 发布机器人动作
+        # Publish the robot action
         vel_cmd = Twist()
         vel_cmd.linear.x = action[0]
         vel_cmd.angular.z = action[1]
@@ -172,23 +223,22 @@ class GazeboEnv:
         except (rospy.ServiceException) as e:
             print("/gazebo/unpause_physics service call failed")
 
-
+        # propagate state for TIME_DELTA seconds
         time.sleep(TIME_DELTA)
 
         rospy.wait_for_service("/gazebo/pause_physics")
         try:
-            pass
             self.pause()
         except (rospy.ServiceException) as e:
             print("/gazebo/pause_physics service call failed")
 
-        # 读取激光雷达数据，判断是否碰撞
-        done, collision, min_laser = self.observe_collision(self.velodyne_data) # 判断是否终止、是否碰撞、最小激光距离
+        # read velodyne laser state
+        done, collision, min_laser = self.observe_collision(self.velodyne_data)
         v_state = []
-        v_state[:] = self.velodyne_data[:] # 复制当前激光数据
-        laser_state = [v_state] # 包装成列表，便于后续拼接
+        v_state[:] = self.velodyne_data[:]
+        laser_state = [v_state]
 
-        # 读取机器人当前位置和朝向
+        # Calculate robot heading from odometry data
         self.odom_x = self.last_odom.pose.pose.position.x
         self.odom_y = self.last_odom.pose.pose.position.y
         quaternion = Quaternion(
@@ -200,11 +250,11 @@ class GazeboEnv:
         euler = quaternion.to_euler(degrees=False)
         angle = round(euler[2], 4)
 
-        distance = np.linalg.norm(
-            [self.odom_x - self.goal_x, self.odom_y - self.goal_y]
-        )
+        # Calculate distance to the local goal from the robot
+        local_goal_x, local_goal_y = self.local_goal
+        distance = np.linalg.norm([self.odom_x - local_goal_x, self.odom_y - local_goal_y])
 
-        # 计算机器人朝向与目标方向的夹角
+        # Calculate the relative angle between the robots heading and heading toward the goal
         skew_x = self.goal_x - self.odom_x
         skew_y = self.goal_y - self.odom_y
         dot = skew_x * 1 + skew_y * 0
@@ -224,17 +274,36 @@ class GazeboEnv:
             theta = -np.pi - theta
             theta = np.pi - theta
 
+        # 计算目标方向和机器人朝向的单位向量
+        goal_direction = np.array([skew_x, skew_y]) / (np.linalg.norm([skew_x, skew_y]) + 1e-8)
+        robot_heading = np.array([np.cos(angle), np.sin(angle)])
+
+        # Detect if the goal has been reached and give a large positive reward
         if distance < GOAL_REACHED_DIST:
             target = True
             done = True
 
-        robot_state = [distance, theta, action[0], action[1]] # 机器人状态：距离、角度、线速度、角速度
-        state = np.append(laser_state, robot_state) # 拼接激光数据和机器人状态，作为新状态
-        reward = self.get_reward(target, collision, action, min_laser) # 计算奖励
+        robot_state = [distance, theta, action[0], action[1]]
+        state = np.append(laser_state, robot_state)
+
+        # Add local goal to state
+        state = np.append(state, [local_goal_x, local_goal_y])
+
+        reward = self.get_reward(target, collision, action, min_laser)
+        
+        # Update local goal if the robot is close to the current local goal
+        if distance < LOCAL_GOAL_REACHED_DIST:
+            self.global_path_index += 1
+            if self.global_path_index < len(self.global_path):
+                self.local_goal = self.global_path[self.global_path_index]
+            else:
+                self.local_goal = self.goal  # 最后一个局部目标点就是全局目标点
+
         return state, reward, done, target
 
     def reset(self):
 
+        # Resets the state of the environment and returns an initial observation.
         rospy.wait_for_service("/gazebo/reset_world")
         try:
             self.reset_proxy()
@@ -255,8 +324,7 @@ class GazeboEnv:
             position_ok = check_pos(x, y)
         object_state.pose.position.x = x
         object_state.pose.position.y = y
-
-
+        # object_state.pose.position.z = 0.
         object_state.pose.orientation.x = quaternion.x
         object_state.pose.orientation.y = quaternion.y
         object_state.pose.orientation.z = quaternion.z
@@ -266,9 +334,15 @@ class GazeboEnv:
         self.odom_x = object_state.pose.position.x
         self.odom_y = object_state.pose.position.y
 
-
+        # set a random goal in empty space in environment
         self.change_goal()
-
+        # 生成全局路径并初始化局部目标点
+        start = (self.odom_x, self.odom_y)
+        goal = (self.goal_x, self.goal_y)
+        self.global_path = self.plan_path(start, goal)
+        self.global_path_index = 0
+        self.local_goal = self.global_path[self.global_path_index] if self.global_path else goal
+        # randomly scatter boxes in the environment
         self.random_box()
         self.publish_markers([0.0, 0.0])
 
@@ -289,12 +363,12 @@ class GazeboEnv:
         v_state[:] = self.velodyne_data[:]
         laser_state = [v_state]
 
-        distance = np.linalg.norm(
-            [self.odom_x - self.goal_x, self.odom_y - self.goal_y]
-        )
+        # Calculate distance to the local goal from the robot
+        local_goal_x, local_goal_y = self.local_goal
+        distance = np.linalg.norm([self.odom_x - local_goal_x, self.odom_y - local_goal_y])
 
-        skew_x = self.goal_x - self.odom_x
-        skew_y = self.goal_y - self.odom_y
+        skew_x = local_goal_x - self.odom_x
+        skew_y = local_goal_y - self.odom_y
 
         dot = skew_x * 1 + skew_y * 0
         mag1 = math.sqrt(math.pow(skew_x, 2) + math.pow(skew_y, 2))
@@ -317,11 +391,13 @@ class GazeboEnv:
 
         robot_state = [distance, theta, 0.0, 0.0]
         state = np.append(laser_state, robot_state)
+
+        # Add local goal to state
+        state = np.append(state, [local_goal_x, local_goal_y])
         return state
 
     def change_goal(self):
-        # 随机生成一个新的目标点，并确保它不会出现在障碍物上或地图外
-        # 同时随着训练进行，目标点的随机范围会逐渐扩大，让任务更有挑战性
+        # Place a new goal and check if its location is not on one of the obstacles
         if self.upper < 10:
             self.upper += 0.004
         if self.lower > -10:
@@ -329,12 +405,21 @@ class GazeboEnv:
 
         goal_ok = False
 
+        # 修复 change_goal 方法中 is_in_obstacle 的调用
         while not goal_ok:
             self.goal_x = self.odom_x + random.uniform(self.upper, self.lower)
             self.goal_y = self.odom_y + random.uniform(self.upper, self.lower)
-            goal_ok = check_pos(self.goal_x, self.goal_y)
+            goal_ok = check_pos(self.goal_x, self.goal_y) and not is_in_obstacle((self.goal_x, self.goal_y))
+        # 重新生成全局路径和局部目标点
+        start = (self.odom_x, self.odom_y)
+        goal = (self.goal_x, self.goal_y)
+        self.global_path = self.plan_path(start, goal)
+        self.global_path_index = 0
+        self.local_goal = self.global_path[self.global_path_index] if self.global_path else goal
 
     def random_box(self):
+        self.dynamic_obstacles = []  # 用于存储动态障碍物信息
+
         for i in range(4):
             name = "cardboard_box_" + str(i)
 
@@ -349,6 +434,8 @@ class GazeboEnv:
                 distance_to_goal = np.linalg.norm([x - self.goal_x, y - self.goal_y])
                 if distance_to_robot < 1.5 or distance_to_goal < 1.5:
                     box_ok = False
+
+            # 发布到 Gazebo
             box_state = ModelState()
             box_state.model_name = name
             box_state.pose.position.x = x
@@ -359,6 +446,9 @@ class GazeboEnv:
             box_state.pose.orientation.z = 0.0
             box_state.pose.orientation.w = 1.0
             self.set_state.publish(box_state)
+
+            # 添加到动态障碍物列表
+            self.dynamic_obstacles.append({"center": (x, y), "radius": 0.5})
 
     def publish_markers(self, action):
         # Publish visual data in Rviz
@@ -440,3 +530,44 @@ class GazeboEnv:
         else:
             r3 = lambda x: 1 - x if x < 1 else 0.0
             return action[0] / 2 - abs(action[1]) / 2 - r3(min_laser) / 2
+
+    def plan_path(self, start, goal):
+        # print(f"Planning path from start: {start} to goal: {goal}")  # 打印起点和终点
+        max_iter = 4000
+        step_size = 0.8
+        goal_sample_rate = 0.5
+        path = []
+        tree = [start]
+
+        for _ in range(max_iter):
+            sample = sample_continuous(x_range=(-4.5, 4.5), y_range=(-4.5, 4.5), goal_sample_rate=goal_sample_rate, goal=goal)
+            # print(f"Sampled Point: {sample}")
+            nearest = min(tree, key=lambda n: np.linalg.norm(np.array(n) - np.array(sample)))
+            # print(f"Nearest Point: {nearest}")
+            new_point = steer_continuous(nearest, sample, step_size)
+            # print(f"New Point: {new_point}")
+            if is_collision_free(nearest, new_point):
+                # print(f"Collision Free: {is_collision_free(nearest, new_point)}")
+                tree.append(new_point)
+                if np.linalg.norm(np.array(new_point) - np.array(goal)) < 0.3:
+                    path.append(goal)
+                    # print("Goal1 reached!")
+                    visited = set()
+                    while np.linalg.norm(np.array(new_point) - np.array(start)) >= 1e-6:
+                        # print("Goal2 reached!")
+                        if new_point in visited:
+                            # print("Detected a loop, breaking out of the while loop.")
+                            break
+                        visited.add(new_point)
+                        path.append(new_point)
+                        new_point = min(tree, key=lambda n: np.linalg.norm(np.array(n) - np.array(new_point)))
+                    
+                    # print("Path found:", path[::-1])
+                    # print(f"Tree: {tree}")
+                    return path[::-1]
+        print("No path found")
+        return None
+
+
+
+
