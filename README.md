@@ -56,7 +56,7 @@ catkin_make_isolated
 
 Open a terminal and set up sources:
 ```shell
-source env_init.bash
+source env_init.sh
 ```
 
 Run the training:
