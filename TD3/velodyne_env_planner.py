@@ -295,7 +295,7 @@ class GazeboEnv:
                 obs_circ=[],
             ))
         cost, path, expand = planner.plan()
-        print("RRT path:", path)
+        # print("RRT path:", path)
 
 
         # Publish the planned path

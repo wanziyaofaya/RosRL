@@ -83,10 +83,8 @@ class RRT(SampleSearcher):
                     self.goal.g = node_new.g + self.dist(self.goal, node_new)
                     sample_list[self.goal.current] = self.goal
                     cost, path = self.extractPath(sample_list)
-                    print(f"Path found: {path}, Cost: {cost}")  # Debugging: Path found
                     return cost, path, list(sample_list.values())
 
-        print("No path found")  # Debugging: No path found
         return 0, None, list(sample_list.values())
 
     def run(self) -> None:
@@ -133,8 +131,6 @@ class RRT(SampleSearcher):
                         (node_near.y + dist * math.sin(theta))),
                          node_near.current, node_near.g + dist, 0)
         
-        # obstacle check
-        print(f"node_new: {node_new.current}, node_near: {node_near.current}")  # Debugging: New and near nodes
         if self.isCollision(node_new, node_near):
             return None
         return node_new
