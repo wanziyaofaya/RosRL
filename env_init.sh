@@ -25,6 +25,7 @@ source /root/RosRL/catkin_ws/devel_isolated/setup.bash || {
 }
 
 cd ..
+cd TD3/
 
 # 如果脚本执行成功，输出提示信息
 echo "ROS 环境已成功加载，catkin_ws 目录已准备好。"
