@@ -1,9 +1,4 @@
-"""
-@file: rrt.py
-@breif: RRT motion planning
-@author: Yang Haodong, Wu Maojia
-@update: 2024.6.23
-"""
+
 import math
 import numpy as np
 
@@ -33,8 +28,8 @@ class RRT(SampleSearcher):
     References:
         [1] Rapidly-Exploring Random Trees: A New Tool for Path Planning
     """
-    def __init__(self, start: tuple, goal: tuple, env: Map, max_dist: float = 0.25,
-        sample_num: int = 10000, goal_sample_rate: float = 0.2) -> None:
+    def __init__(self, start: tuple, goal: tuple, env: Map, max_dist: float = 0.5,
+        sample_num: int = 10000, goal_sample_rate: float = 0.05) -> None:
         super().__init__(start, goal, env)
         # Maximum expansion distance one step
         self.max_dist =  max_dist
@@ -93,6 +88,7 @@ class RRT(SampleSearcher):
         """
         cost, path, expand = self.plan()
         self.plot.animation(path, str(self), cost, expand)
+
 
     def generateRandomNode(self) -> Node:
         """

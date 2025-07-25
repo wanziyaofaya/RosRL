@@ -9,7 +9,7 @@ from numpy import inf
 from torch.utils.tensorboard import SummaryWriter
 
 from replay_buffer import ReplayBuffer
-from velodyne_env_rrt import GazeboEnv
+from velodyne_env_planner import GazeboEnv
 
 # 评估函数，用于测试训练好的网络性能
 def evaluate(network, epoch, eval_episodes=10): # 要评估的TD3网络，当前训练轮次，评估回合数，默认10回合
@@ -260,7 +260,7 @@ if save_model and not os.path.exists("./pytorch_models"):
 
 # Create the training environment
 environment_dim = 20
-robot_dim = 4
+robot_dim = 5
 env = GazeboEnv("multi_robot_scenario.launch", environment_dim)
 time.sleep(5)
 torch.manual_seed(seed)

@@ -37,9 +37,15 @@ class Node(object):
         self.g = g
         self.h = h
     
-    def __add__(self, node):
-        assert isinstance(node, Node)
-        return Node((self.x + node.x, self.y + node.y), self.parent, self.g + node.g, self.h)
+    def __add__(self, motion):
+        if isinstance(motion, Node):
+            return Node((self.x + motion.x, self.y + motion.y), self.parent, self.g + motion.g, self.h)
+        elif isinstance(motion, tuple) and len(motion) == 3:
+            # motion格式: (dx, dy, cost)
+            dx, dy, cost = motion
+            return Node((self.x + dx, self.y + dy), self.parent, self.g + cost, self.h)
+        else:
+            raise ValueError("Invalid motion format")
 
     def __eq__(self, node) -> bool:
         if not isinstance(node, Node):
@@ -118,6 +124,38 @@ class Planner(ABC):
         Interface for running both plannig and animation.
         '''
         pass
+
+class Grid:
+    """Grid environment for path planning."""
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.grid = [[0 for _ in range(height)] for _ in range(width)]
+        self.obstacles = set()
+        
+        # 8-connected motion model
+        self.motions = [
+            (1, 0, 1.0),      # 右
+            (-1, 0, 1.0),     # 左
+            (0, 1, 1.0),      # 上
+            (0, -1, 1.0),     # 下
+            (1, 1, 1.414),    # 右上
+            (-1, 1, 1.414),   # 左上
+            (1, -1, 1.414),   # 右下
+            (-1, -1, 1.414),  # 左下
+        ]
+        
+    def add_obstacle(self, x, y):
+        """Add obstacle at grid position (x, y)"""
+        if 0 <= x < self.width and 0 <= y < self.height:
+            self.grid[x][y] = 1
+            self.obstacles.add((x, y))
+    
+    def is_obstacle(self, x, y):
+        """Check if position (x, y) is an obstacle"""
+        if x < 0 or x >= self.width or y < 0 or y >= self.height:
+            return True
+        return self.grid[x][y] == 1
 
 class Map:
     """Placeholder class for Map."""

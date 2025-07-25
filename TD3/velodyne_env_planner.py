@@ -17,6 +17,8 @@ from std_srvs.srv import Empty
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from rrt import RRT
+from informed_rrt import InformedRRT
+from rrt_star import RRTStar
 from utils import Map
 
 GOAL_REACHED_DIST = 0.3
@@ -28,34 +30,34 @@ TIME_DELTA = 0.1
 def check_pos(x, y):
     goal_ok = True
 
-    if -3.8 > x > -6.2 and 6.2 > y > 3.8:
+    if -3.8 > x > -5.2 and 6.2 > y > 3.8:
         goal_ok = False
 
-    if -1.3 > x > -2.7 and 4.7 > y > -0.2:
+    if -1.3 > x > -1.7 and 4.7 > y > -0.2:
         goal_ok = False
 
-    if -0.3 > x > -4.2 and 2.7 > y > 1.3:
+    if -0.3 > x > -3.2 and 2.7 > y > 1.3:
         goal_ok = False
 
-    if -0.8 > x > -4.2 and -2.3 > y > -4.2:
+    if -0.8 > x > -3.2 and -2.3 > y > -4.2:
         goal_ok = False
 
-    if -1.3 > x > -3.7 and -0.8 > y > -2.7:
+    if -1.3 > x > -2.7 and -0.8 > y > -2.7:
         goal_ok = False
 
-    if 4.2 > x > 0.8 and -1.8 > y > -3.2:
+    if 4.2 > x > 1.8 and -1.8 > y > -3.2:
         goal_ok = False
 
-    if 4 > x > 2.5 and 0.7 > y > -3.2:
+    if 4 > x > 3.5 and 0.7 > y > -3.2:
         goal_ok = False
 
-    if 6.2 > x > 3.8 and -3.3 > y > -4.2:
+    if 6.2 > x > 4.8 and -3.3 > y > -4.2:
         goal_ok = False
 
-    if 4.2 > x > 1.3 and 3.7 > y > 1.5:
+    if 4.2 > x > 2.3 and 3.7 > y > 1.5:
         goal_ok = False
 
-    if -3.0 > x > -7.2 and 0.5 > y > -1.5:
+    if -3.0 > x > -6.2 and 0.5 > y > -1.5:
         goal_ok = False
 
     if x > 4.5 or x < -4.5 or y > 4.5 or y < -4.5:
@@ -79,6 +81,8 @@ class GazeboEnv:
         self.lower = -5.0 # 目标点随机生成的下界
         self.velodyne_data = np.ones(self.environment_dim) * 10 # 初始化激光雷达数据，每个扇区的距离都设为10米（表示很远，没有障碍物）
         self.last_odom = None # 最近一次里程计数据
+
+        self.path = [[self.goal_x, self.goal_y]]
 
         # 初始化机器人模型状态
         self.set_self_state = ModelState()
@@ -106,7 +110,11 @@ class GazeboEnv:
         print("Roscore launched!")
 
         # Launch the simulation with the given launchfile name
-        rospy.init_node("gym", anonymous=True)
+        try:
+            rospy.init_node("gym", anonymous=True)
+        except rospy.exceptions.ROSException:
+            # 如果节点已经初始化，继续执行
+            pass
         if launchfile.startswith("/"):
             fullpath = launchfile
         else:
@@ -160,6 +168,7 @@ class GazeboEnv:
 
     def step(self, action):
         target = False # 标记是否到达目标点，初始为False
+        local_target = False # 标记是否到达局部目标点，初始为False
 
         # 1. 发布机器人动作
         vel_cmd = Twist()
@@ -206,6 +215,14 @@ class GazeboEnv:
             [self.odom_x - self.goal_x, self.odom_y - self.goal_y]
         )
 
+        first_local_x, first_local_y = self.path[-1]
+        local_goal_distance = np.linalg.norm(
+            [first_local_x - self.odom_x, first_local_y - self.odom_y]
+        )
+        if local_goal_distance < GOAL_REACHED_DIST:
+            local_target = True
+            self.path.pop()
+
         # 计算机器人朝向与目标方向的夹角
         skew_x = self.goal_x - self.odom_x
         skew_y = self.goal_y - self.odom_y
@@ -230,9 +247,9 @@ class GazeboEnv:
             target = True
             done = True
 
-        robot_state = [distance, theta, action[0], action[1]] # 机器人状态：距离、角度、线速度、角速度
+        robot_state = [distance, theta, action[0], action[1], local_goal_distance] # 机器人状态：距离、角度、线速度、角速度
         state = np.append(laser_state, robot_state) # 拼接激光数据和机器人状态，作为新状态
-        reward = self.get_reward(target, collision, action, min_laser) # 计算奖励
+        reward = self.get_reward(target, collision, action, min_laser, local_target) # 计算奖励
         return state, reward, done, target
 
     def reset(self):
@@ -273,16 +290,16 @@ class GazeboEnv:
 
         # Update RRT planner with obstacle information
         obstacles_rect = [
-            (-6.2, 3.8, 2.4, 2.4),
-            (-2.7, -0.2, 1.4, 5.0),
-            (-4.2, 1.3, 3.9, 1.4),
-            (-4.2, -4.2, 0.0, 1.5),
-            (-3.7, -2.7, 1.0, 1.9),
-            (0.8, -3.2, 3.4, 1.4),
-            (2.5, -3.2, 1.5, 3.9),
-            (3.8, -4.2, 2.4, 0.9),
-            (1.3, 1.5, 2.9, 2.2),
-            (-7.2, -1.5, 4.2, 2.0),
+            (-5.2, 3.8, 1.4, 2.4),  
+            (-1.7, -0.2, 0.4, 4.9),  
+            (-3.2, 1.3, 2.9, 1.4),  
+            (-3.2, -4.2, 2.4, 1.9),  
+            (-2.7, -2.7, 1.4, 1.9),  
+            (1.8, -3.2, 2.4, 1.4),   
+            (3.5, -3.2, 0.5, 3.9),   
+            (4.8, -4.2, 1.4, 0.9),  
+            (2.3, 1.5, 1.9, 2.2),    
+            (-6.2, -1.5, 3.2, 2.0),  
         ]
 
         planner = RRT(
@@ -297,12 +314,14 @@ class GazeboEnv:
         cost, path, expand = planner.plan()
         # print("RRT path:", path)
 
-
         # Publish the planned path
-        if path is None:
-            print("RRT path not found")
-            path = [[self.odom_x, self.odom_y], [self.goal_x, self.goal_y]]
-        self.publish_path(path)
+        if path:
+            self.path = path[:-1]
+        else:
+            print("RRT path not found, using goal as path")
+
+        self.publish_path(self.path)
+
 
         self.random_box()
         self.publish_markers([0.0, 0.0])
@@ -327,6 +346,13 @@ class GazeboEnv:
         distance = np.linalg.norm(
             [self.odom_x - self.goal_x, self.odom_y - self.goal_y]
         )
+        if self.path:
+            first_local_x, first_local_y = self.path[-1]
+            local_goal_distance = np.linalg.norm(
+                [first_local_x - self.odom_x, first_local_y - self.odom_y]
+            )
+        else:
+            local_goal_distance = distance
 
         skew_x = self.goal_x - self.odom_x
         skew_y = self.goal_y - self.odom_y
@@ -350,7 +376,7 @@ class GazeboEnv:
             theta = -np.pi - theta
             theta = np.pi - theta
 
-        robot_state = [distance, theta, 0.0, 0.0]
+        robot_state = [distance, theta, 0.0, 0.0, local_goal_distance]
         state = np.append(laser_state, robot_state)
         return state
 
@@ -493,11 +519,15 @@ class GazeboEnv:
         return False, False, min_laser
 
     @staticmethod
-    def get_reward(target, collision, action, min_laser):
+    def get_reward(target, collision, action, min_laser, local_target=False):
         if target:
             return 100.0
         elif collision:
             return -100.0
         else:
-            r3 = lambda x: 1 - x if x < 1 else 0.0
-            return action[0] / 2 - abs(action[1]) / 2 - r3(min_laser) / 2
+            if local_target:
+                r3 = lambda x: 1 - x if x < 1 else 0.0
+                return action[0] / 2 - abs(action[1]) / 2 - r3(min_laser) / 2 + 1
+            else:
+                r3 = lambda x: 1 - x if x < 1 else 0.0
+                return action[0] / 2 - abs(action[1]) / 2 - r3(min_laser) / 2
