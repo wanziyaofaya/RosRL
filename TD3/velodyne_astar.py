@@ -66,6 +66,47 @@ def check_pos(x, y):
 
 
 class GazeboEnv:
+    def visualize_check_pos_obstacles(self):
+        from visualization_msgs.msg import Marker, MarkerArray
+        marker_array = MarkerArray()
+        idx = 0
+        # 每个障碍物用一个长方体表示，参数与check_pos一致
+        obstacles = [
+            # (中心x, 中心y, 宽, 高)
+            ((-5.0, 5.0), 2.4, 2.4),      # -3.8 > x > -6.2 and 6.2 > y > 3.8
+            ((-2.0, 2.25), 1.4, 4.9),     # -1.3 > x > -2.7 and 4.7 > y > -0.2
+            ((-2.25, 2.0), 3.9, 1.4),     # -0.3 > x > -4.2 and 2.7 > y > 1.3
+            ((-2.5, -3.25), 3.4, 1.9),    # -0.8 > x > -4.2 and -2.3 > y > -4.2
+            ((-2.5, -1.75), 2.4, 1.9),    # -1.3 > x > -3.7 and -0.8 > y > -2.7
+            ((2.5, -2.5), 3.4, 1.4),      # 4.2 > x > 0.8 and -1.8 > y > -3.2
+            ((3.25, -1.25), 1.5, 3.9),    # 4 > x > 2.5 and 0.7 > y > -3.2
+            ((5.0, -3.75), 2.4, 0.9),     # 6.2 > x > 3.8 and -3.3 > y > -4.2
+            ((2.75, 2.6), 2.9, 2.2),      # 4.2 > x > 1.3 and 3.7 > y > 1.5
+            ((-5.1, -0.5), 4.2, 2.0),     # -3.0 > x > -7.2 and 0.5 > y > -1.5
+            ((0, -4.75), 10.0, 0.5),      # 下边界
+            ((0, 4.75), 10.0, 0.5),       # 上边界
+            ((-4.75, 0), 0.5, 10.0),      # 左边界
+            ((4.75, 0), 0.5, 10.0),       # 右边界
+        ]
+        for (cx, cy), w, h in obstacles:
+            marker = Marker()
+            marker.header.frame_id = "odom"
+            marker.type = Marker.CUBE
+            marker.action = Marker.ADD
+            marker.scale.x = w
+            marker.scale.y = h
+            marker.scale.z = 0.1
+            marker.color.a = 0.5
+            marker.color.r = 1.0
+            marker.color.g = 0.0
+            marker.color.b = 0.0
+            marker.pose.position.x = cx
+            marker.pose.position.y = cy
+            marker.pose.position.z = 0.05
+            marker.id = idx
+            idx += 1
+            marker_array.markers.append(marker)
+        self.publisher.publish(marker_array)
     """Superclass for all Gazebo environments."""
 
     def __init__(self, launchfile, environment_dim):
@@ -419,22 +460,50 @@ class GazeboEnv:
         rospy.sleep(0.5)  # 等待雷达数据更新
         initial_laser_data = self.velodyne_data[:]
 
-        # 执行180度旋转
+
+        # === 角度控制旋转180°，先快后慢 ===
         vel_cmd = Twist()
-        vel_cmd.angular.z = 1.0  # 角速度
-        rotation_time = np.pi / abs(vel_cmd.angular.z)  # 计算旋转时间
-        
-        # 发布旋转命令
-        start_time = rospy.Time.now()
-        while (rospy.Time.now() - start_time).to_sec() < rotation_time:
+        # 记录初始角度
+        if self.last_odom is not None:
+            q = self.last_odom.pose.pose.orientation
+            quat = Quaternion(q.w, q.x, q.y, q.z)
+            euler = quat.to_euler(degrees=False)
+            start_yaw = euler[2]
+        else:
+            start_yaw = 0.0
+        rotated = 0.0
+        prev_yaw = start_yaw
+        rate = rospy.Rate(50)
+        while abs(rotated) < np.pi:
+            # 先快后慢，剩余小于0.3弧度时减速
+            remain = np.pi - abs(rotated)
+            if remain > 0.3:
+                vel_cmd.angular.z = 1.0
+            elif remain > 0.1:
+                vel_cmd.angular.z = 0.3
+            else:
+                vel_cmd.angular.z = 0.05
             self.vel_pub.publish(vel_cmd)
             self.publish_markers([0.0, vel_cmd.angular.z])
-            rospy.sleep(0.02)  # 50Hz的控制频率
-        
-        # 停止旋转
+            if self.last_odom is not None:
+                q = self.last_odom.pose.pose.orientation
+                quat = Quaternion(q.w, q.x, q.y, q.z)
+                euler = quat.to_euler(degrees=False)
+                curr_yaw = euler[2]
+            else:
+                curr_yaw = prev_yaw
+            delta_yaw = curr_yaw - prev_yaw
+            # print(f"当前角度: {curr_yaw:.3f}, 之前角度: {prev_yaw:.3f}, 旋转增量: {delta_yaw:.3f}, 累计旋转: {rotated:.3f}")
+            if delta_yaw > np.pi:
+                delta_yaw -= 2 * np.pi
+            elif delta_yaw < -np.pi:
+                delta_yaw += 2 * np.pi
+            rotated += delta_yaw
+            prev_yaw = curr_yaw
+            rate.sleep()
         vel_cmd.angular.z = 0.0
         self.vel_pub.publish(vel_cmd)
-        rospy.sleep(0.5)  # 等待机器人完全停止和雷达数据更新
+        rospy.sleep(0.5)
 
         # 收集旋转180°后的雷达数据
         rotated_laser_data = self.velodyne_data[:]
@@ -447,28 +516,71 @@ class GazeboEnv:
         else:
             print("未找到最优子目标点\n")
 
-        # 准备写入数据
-        row_data = [self.odom_x, self.odom_y, self.goal_x, self.goal_y]  # 起点和终点坐标
+        # 准备写入数据，插入最优子目标点坐标
+        row_data = [self.odom_x, self.odom_y, self.goal_x, self.goal_y]
+        # 插入最优子目标点坐标
+        if optimal_subgoal is not None:
+            row_data.extend([optimal_subgoal[0], optimal_subgoal[1]])
+        else:
+            row_data.extend([None, None])
         row_data.extend(initial_laser_data)  # 初始雷达数据
         row_data.extend(rotated_laser_data)  # 旋转后雷达数据
 
-        # 只写入起点、终点和激光数据
-        with open('laser_data.csv', 'a', newline='') as csvfile:
+        # 写入前检查是否已收集3000行数据（含表头共3001行）
+        csv_path = 'laser_data.csv'
+        try:
+            with open(csv_path, 'r') as f:
+                row_count = sum(1 for _ in f)
+        except FileNotFoundError:
+            row_count = 0
+        # 第一行为表头，实际数据行数=row_count-1
+        if row_count >= 3001:
+            print("已收集3000行数据，停止写入laser_data.csv。");
+            return
+        with open(csv_path, 'a', newline='') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(row_data)
 
-        # 旋转回原位
-        vel_cmd.angular.z = -1.0
-        start_time = rospy.Time.now()
-        while (rospy.Time.now() - start_time).to_sec() < rotation_time:
+        # === 角度控制旋转回原位，先快后慢 ===
+        # 记录当前角度为回转起点
+        if self.last_odom is not None:
+            q = self.last_odom.pose.pose.orientation
+            quat = Quaternion(q.w, q.x, q.y, q.z)
+            euler = quat.to_euler(degrees=False)
+            start_yaw = euler[2]
+        else:
+            start_yaw = 0.0
+        rotated = 0.0
+        prev_yaw = start_yaw
+        rate = rospy.Rate(50)
+        while abs(rotated) < np.pi:
+            remain = np.pi - abs(rotated)
+            if remain > 0.3:
+                vel_cmd.angular.z = -1.0
+            elif remain > 0.1:
+                vel_cmd.angular.z = -0.3
+            else:
+                vel_cmd.angular.z = -0.1
             self.vel_pub.publish(vel_cmd)
             self.publish_markers([0.0, vel_cmd.angular.z])
-            rospy.sleep(0.02)
-
-        # 完全停止
+            if self.last_odom is not None:
+                q = self.last_odom.pose.pose.orientation
+                quat = Quaternion(q.w, q.x, q.y, q.z)
+                euler = quat.to_euler(degrees=False)
+                curr_yaw = euler[2]
+            else:
+                curr_yaw = prev_yaw
+            delta_yaw = curr_yaw - prev_yaw
+            if delta_yaw > np.pi:
+                delta_yaw -= 2 * np.pi
+            elif delta_yaw < -np.pi:
+                delta_yaw += 2 * np.pi
+            rotated += delta_yaw
+            prev_yaw = curr_yaw
+            rate.sleep()
         vel_cmd.angular.z = 0.0
         self.vel_pub.publish(vel_cmd)
-        rospy.sleep(0.5)  # 等待机器人完全停止
+        rospy.sleep(0.5)
 
         # 暂停物理引擎
         rospy.wait_for_service("/gazebo/pause_physics")
@@ -532,13 +644,15 @@ class GazeboEnv:
 
         robot_state = [distance, theta, 0.0, 0.0, local_goal_distance]
         state = np.append(laser_state, robot_state)
+        # 可视化check_pos障碍物
+        self.visualize_check_pos_obstacles()
         return state
 
     def find_optimal_subgoal(self, *args, **kwargs):
 
         if not self.path or len(self.path) < 2:
             return None
-        sample_interval = 0.1  # 采样间隔（米）
+        sample_interval = 0.05  # 采样间隔（米）
         sampled_points = []
         # 沿路径每段采样
         for seg_idx in range(len(self.path) - 1):
@@ -554,7 +668,7 @@ class GazeboEnv:
                 py = y0 + t * dy
                 sampled_points.append((px, py))
         sampled_points.append(self.path[-1])
-        # # print("sampled_points:")
+        # print("sampled_points:")
         # for idx, pt in enumerate(sampled_points):
         #     print(f"  {idx}: ({pt[0]:.3f}, {pt[1]:.3f})")
         def to_robot_frame(point_x, point_y):
@@ -563,11 +677,24 @@ class GazeboEnv:
             distance = math.sqrt(rel_x**2 + rel_y**2)
             return distance
 
+        def line_collision(x0, y0, x1, y1, step=0.01):
+            # 采样直线上点，判断是否有点在障碍物内
+            dist = math.hypot(x1 - x0, y1 - y0)
+            n = max(2, int(dist / step))
+            for j in range(n + 1):
+                t = j / n
+                px = x0 + t * (x1 - x0)
+                py = y0 + t * (y1 - y0)
+                # print(f"Checking point ({px:.4f}, {py:.4f}) for collision")
+                if not check_pos(px, py):
+                    return True  # 有碰撞
+            return False  # 无碰撞
+
         optimal_idx = -1
         max_distance = 0
         for i, (point_x, point_y) in enumerate(sampled_points):
-            # 判断该点是否与障碍物碰撞
-            if not check_pos(point_x, point_y):
+            # 判断当前点到采样点的连线是否与障碍物碰撞
+            if line_collision(self.odom_x, self.odom_y, point_x, point_y):
                 continue
             distance = to_robot_frame(point_x, point_y)
             if distance > max_distance:
