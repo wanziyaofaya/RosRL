@@ -378,13 +378,13 @@ class GazeboEnv:
         # print(f"起点: ({self.odom_x:.2f}, {self.odom_y:.2f})")
         # print(f"终点: ({self.goal_x:.2f}, {self.goal_y:.2f})")
         
-        # if path:
-        #     print("\n路径点坐标：")
-        #     for grid_x, grid_y in path:
-        #         # 从网格坐标转换回实际坐标
-        #         real_x = grid_x * resolution - 5.0
-        #         real_y = grid_y * resolution - 5.0
-        #         print(f"({real_x:.2f}, {real_y:.2f})")
+        if path:
+            print("\n路径点坐标：")
+            for grid_x, grid_y in path:
+                # 从网格坐标转换回实际坐标
+                real_x = grid_x * resolution - 5.0
+                real_y = grid_y * resolution - 5.0
+                print(f"({real_x:.2f}, {real_y:.2f})")
         
         if path:
             def grid_to_world(grid_x, grid_y):
@@ -443,7 +443,7 @@ class GazeboEnv:
         self.publish_path(self.path, subgoal_point=optimal_subgoal)
         # 打印最优子目标点坐标
         if optimal_subgoal is not None:
-            print(f"最优子目标点坐标: ({optimal_subgoal[0]:.2f}, {optimal_subgoal[1]:.2f})\n")
+            print(f"最优子目标点坐标: ({optimal_subgoal[0]:.3f}, {optimal_subgoal[1]:.3f})\n")
         else:
             print("未找到最优子目标点\n")
 
@@ -534,10 +534,8 @@ class GazeboEnv:
         state = np.append(laser_state, robot_state)
         return state
 
-    def find_optimal_subgoal(self, initial_laser_data, rotated_laser_data, planner):
-        """
-        沿路径连线每0.01米采样，找出既在激光探测范围内、又距离当前位置最远且无碰撞的点，返回其实际坐标。
-        """
+    def find_optimal_subgoal(self, *args, **kwargs):
+
         if not self.path or len(self.path) < 2:
             return None
         sample_interval = 0.1  # 采样间隔（米）
@@ -556,50 +554,26 @@ class GazeboEnv:
                 py = y0 + t * dy
                 sampled_points.append((px, py))
         sampled_points.append(self.path[-1])
-        print("sampled_points:")
-        for idx, pt in enumerate(sampled_points):
-            print(f"  {idx}: ({pt[0]:.3f}, {pt[1]:.3f})")
+        # # print("sampled_points:")
+        # for idx, pt in enumerate(sampled_points):
+        #     print(f"  {idx}: ({pt[0]:.3f}, {pt[1]:.3f})")
         def to_robot_frame(point_x, point_y):
             rel_x = point_x - self.odom_x
             rel_y = point_y - self.odom_y
             distance = math.sqrt(rel_x**2 + rel_y**2)
-            angle = math.atan2(rel_y, rel_x)
-            return distance, angle
-
-        # 定义world_to_grid函数（与reset一致）
-        resolution = 0.01
-        def world_to_grid(x, y):
-            grid_x = int(round((x + 5.0) / resolution))
-            grid_y = int(round((y + 5.0) / resolution))
-            return grid_x, grid_y
-
-        # def is_in_laser_range(distance, angle):
-        #     while angle > np.pi:
-        #         angle -= 2 * np.pi
-        #     while angle < -np.pi:
-        #         angle += 2 * np.pi
-        #     index = int((angle + np.pi/2) / (np.pi / len(initial_laser_data)))
-        #     if 0 <= index < len(initial_laser_data):
-        #         return (distance <= initial_laser_data[index] or 
-        #                 distance <= rotated_laser_data[index])
-        #     return False
+            return distance
 
         optimal_idx = -1
         max_distance = 0
         for i, (point_x, point_y) in enumerate(sampled_points):
-            distance, angle = to_robot_frame(point_x, point_y)
-            # if not is_in_laser_range(distance, angle):
-            #     continue
-            # 坐标转换后再判断
-            start_grid = world_to_grid(self.odom_x, self.odom_y)
-            end_grid = world_to_grid(point_x, point_y)
-            if not planner.isPathClear(start_grid, end_grid):
+            # 判断该点是否与障碍物碰撞
+            if not check_pos(point_x, point_y):
                 continue
+            distance = to_robot_frame(point_x, point_y)
             if distance > max_distance:
                 max_distance = distance
                 optimal_idx = i
         if optimal_idx == -1:
-            # path是从终点到起点，终点是self.path[0]
             return tuple(self.path[0])
         return sampled_points[optimal_idx]
 

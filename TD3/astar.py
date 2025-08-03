@@ -4,10 +4,44 @@ from utils import Env, Grid, Node
 
 
 class AStar(GraphSearcher):
+    # 网格坐标转世界坐标
+    def grid_to_world(self, grid_x, grid_y, resolution=0.01, origin_x=-5.0, origin_y=-5.0):
+        world_x = grid_x * resolution + origin_x
+        world_y = grid_y * resolution + origin_y
+        return world_x, world_y
+
+    # 连续空间障碍物判定（需与velodyne_astar.py保持一致）
+    def check_pos(self, x, y):
+        # 这里直接复制velodyne_astar.py的check_pos逻辑
+        goal_ok = True
+        if -3.8 > x > -6.2 and 6.2 > y > 3.8:
+            goal_ok = False
+        if -1.3 > x > -2.7 and 4.7 > y > -0.2:
+            goal_ok = False
+        if -0.3 > x > -4.2 and 2.7 > y > 1.3:
+            goal_ok = False
+        if -0.8 > x > -4.2 and -2.3 > y > -4.2:
+            goal_ok = False
+        if -1.3 > x > -3.7 and -0.8 > y > -2.7:
+            goal_ok = False
+        if 4.2 > x > 0.8 and -1.8 > y > -3.2:
+            goal_ok = False
+        if 4 > x > 2.5 and 0.7 > y > -3.2:
+            goal_ok = False
+        if 6.2 > x > 3.8 and -3.3 > y > -4.2:
+            goal_ok = False
+        if 4.2 > x > 1.3 and 3.7 > y > 1.5:
+            goal_ok = False
+        if -3.0 > x > -7.2 and 0.5 > y > -1.5:
+            goal_ok = False
+        if x > 4.5 or x < -4.5 or y > 4.5 or y < -4.5:
+            goal_ok = False
+        return goal_ok
+
     def run(self):
         pass
 
-    def __init__(self, start: tuple, goal: tuple, env: Grid, heuristic_type: str = "euclidean", weight: float = 1.1) -> None:
+    def __init__(self, start: tuple, goal: tuple, env: Grid, heuristic_type: str = "euclidean", weight: float = 1.0) -> None:
         super().__init__(start, goal, env, heuristic_type)
         self.weight = weight  # 启发式权重，大于1会使路径更倾向于直线
         self.length = len(env.grid)  # 网格地图的长度
@@ -35,7 +69,7 @@ class AStar(GraphSearcher):
         g_score = {self.start.current: 0}
 
 
-        goal_threshold = 2.0  # 允许的到达目标距离
+        goal_threshold = 1.0  # 允许的到达目标距离
         while OPEN:
             node = heapq.heappop(OPEN)
             # 跳过已扩展过的节点
@@ -107,6 +141,7 @@ class AStar(GraphSearcher):
             path.append(node.current)
         # 路径简化（去冗余）
         pruned_path = self.prune_path(path[::-1])  # 反转为起点到终点，去冗余
+        print("pruned_path[::-1]:", pruned_path[::-1])
         return cost, pruned_path[::-1]  # 再反转回终点到起点
 
     def prune_path(self, path):
@@ -139,19 +174,19 @@ class AStar(GraphSearcher):
         return True
         
     def isPathClear(self, start_point, end_point) -> bool:
-
         """
-        支持浮点坐标的路径可行性检测，采用DDA采样法。
+        支持浮点坐标的路径可行性检测，采用DDA采样法，并用check_pos判定障碍物。
         """
         x1, y1 = start_point
         x2, y2 = end_point
         dx = x2 - x1
         dy = y2 - y1
-        steps = int(max(abs(dx), abs(dy)) * 30) 
+        steps = int(max(abs(dx), abs(dy)) * 10)
 
         if steps == 0:
             grid_x, grid_y = int(round(x1)), int(round(y1))
-            return self.isValid((grid_x, grid_y))
+            world_x, world_y = self.grid_to_world(grid_x, grid_y)
+            return self.check_pos(world_x, world_y)
 
         x_inc = dx / steps
         y_inc = dy / steps
@@ -159,7 +194,8 @@ class AStar(GraphSearcher):
         x, y = x1, y1
         for _ in range(steps + 1):
             grid_x, grid_y = int(round(x)), int(round(y))
-            if not self.isValid((grid_x, grid_y)):
+            world_x, world_y = self.grid_to_world(grid_x, grid_y)
+            if not self.check_pos(world_x, world_y):
                 return False
             x += x_inc
             y += y_inc
