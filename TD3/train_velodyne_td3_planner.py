@@ -9,7 +9,8 @@ from numpy import inf
 from torch.utils.tensorboard import SummaryWriter
 
 from replay_buffer import ReplayBuffer
-from velodyne_env_planner import GazeboEnv
+from velodyne_astar import GazeboEnv
+import csv
 
 # 评估函数，用于测试训练好的网络性能
 def evaluate(network, epoch, eval_episodes=10): # 要评估的TD3网络，当前训练轮次，评估回合数，默认10回合
@@ -260,6 +261,18 @@ if save_model and not os.path.exists("./pytorch_models"):
 
 # Create the training environment
 environment_dim = 20
+# 准备CSV文件表头
+with open('laser_data.csv', 'a', newline='') as csvfile:
+    writer = csv.writer(csvfile)
+    # 创建表头
+    headers = ['start_x', 'start_y', 'goal_x', 'goal_y']
+    # 添加子目标坐标的表头
+    headers.extend(['subgoal_x', 'subgoal_y'])
+    # 添加初始位置雷达数据的表头
+    headers.extend([f'laser_0_{i}' for i in range(environment_dim)])
+    # 添加旋转180度后雷达数据的表头
+    headers.extend([f'laser_180_{i}' for i in range(environment_dim)])
+    writer.writerow(headers)
 robot_dim = 5
 env = GazeboEnv("multi_robot_scenario.launch", environment_dim)
 time.sleep(5)
