@@ -262,7 +262,7 @@ if save_model and not os.path.exists("./pytorch_models"):
 # Create the training environment
 environment_dim = 20
 # 准备CSV文件表头
-with open('laser_data.csv', 'a', newline='') as csvfile:
+with open('new_laser_data.csv', 'a', newline='') as csvfile:
     writer = csv.writer(csvfile)
     # 创建表头
     headers = ['start_x', 'start_y', 'goal_x', 'goal_y']

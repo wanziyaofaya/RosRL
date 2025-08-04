@@ -19,10 +19,12 @@ from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from astar import AStar
 from utils import Grid
+from obstacle import load_obstacles
 
 GOAL_REACHED_DIST = 0.3
 COLLISION_DIST = 0.35
 TIME_DELTA = 0.1
+
 
 
 # 检查(x, y)这个点是否在障碍物区域内，如果在障碍物上则返回False，否则返回True
@@ -66,49 +68,64 @@ def check_pos(x, y):
 
 
 class GazeboEnv:
-    def visualize_check_pos_obstacles(self):
-        from visualization_msgs.msg import Marker, MarkerArray
-        marker_array = MarkerArray()
-        idx = 0
-        # 每个障碍物用一个长方体表示，参数与check_pos一致
-        obstacles = [
-            # (中心x, 中心y, 宽, 高)
-            ((-5.0, 5.0), 2.4, 2.4),      # -3.8 > x > -6.2 and 6.2 > y > 3.8
-            ((-2.0, 2.25), 1.4, 4.9),     # -1.3 > x > -2.7 and 4.7 > y > -0.2
-            ((-2.25, 2.0), 3.9, 1.4),     # -0.3 > x > -4.2 and 2.7 > y > 1.3
-            ((-2.5, -3.25), 3.4, 1.9),    # -0.8 > x > -4.2 and -2.3 > y > -4.2
-            ((-2.5, -1.75), 2.4, 1.9),    # -1.3 > x > -3.7 and -0.8 > y > -2.7
-            ((2.5, -2.5), 3.4, 1.4),      # 4.2 > x > 0.8 and -1.8 > y > -3.2
-            ((3.25, -1.25), 1.5, 3.9),    # 4 > x > 2.5 and 0.7 > y > -3.2
-            ((5.0, -3.75), 2.4, 0.9),     # 6.2 > x > 3.8 and -3.3 > y > -4.2
-            ((2.75, 2.6), 2.9, 2.2),      # 4.2 > x > 1.3 and 3.7 > y > 1.5
-            ((-5.1, -0.5), 4.2, 2.0),     # -3.0 > x > -7.2 and 0.5 > y > -1.5
-            ((0, -4.75), 10.0, 0.5),      # 下边界
-            ((0, 4.75), 10.0, 0.5),       # 上边界
-            ((-4.75, 0), 0.5, 10.0),      # 左边界
-            ((4.75, 0), 0.5, 10.0),       # 右边界
+    def visualize_obstacles(self):
+        obstacles_rect = [
+            (-3.41, 1.78, 2.52, 0.17),  
+            (-2.23, 0.39, 2.77, 0.17),  
+            (2.09, 2.95, 1.29, 0.17),  
+            (3.20, 2.13, 0.98, 0.17),  
+            (2.12, 2.13, 1.27, 0.17),  
+            (2.08, 2.13, 0.98, 0.17),   
+            (-3.42, -3.41, 1.99, 0.17),   
+            (-2.59, -3.41, 2.1, 0.17),  
+            (-3.39, -3.37, 2.1, 0.17),    
+            (1.51, -2.56, 1.77, 0.17),  
+            (3.13, -2.54, 2.6, 0.17),   
+            (-5.5, 5.35, 11.0, 0.16),    
+            (5.34, -5.5, 11.0, 0.16),   
+            (-5.5, -5.5, 11.0, 0.16), 
+            (-5.5, -5.5, 11.0, 0.16), 
+            (-0.45, 0.0, 0.9, 0.02), 
+            (0.44, -0.4, 0.03, 0.4), 
+            (-0.46, -0.4, 0.03, 0.4), 
+            (-0.44, -0.4, 0.89, 0.4), 
+            (-0.44, -0.4, 0.89, 0.4),
+            (-0.44, -0.4, 0.89, 0.4),
+            (-0.44, -0.4, 0.89, 0.4),
+            (-0.75, -0.4, 1.5, 0.8),
+            (-0.25, -0.2, 0.5, 0.4),
+            (-0.25, -0.2, 0.5, 0.4),
+            (-0.25, -0.2, 0.5, 0.4),
+            (-0.25, -0.2, 0.5, 0.4),
+            (-0.66, 0.36, 0.03, 0.03),
+            (-0.66, -0.40, 0.03, 0.03),
+            (-0.70, -0.40, 0.03, 0.03),
+            (-0.70, 0.36, 0.03, 0.03),
+            (0.00, 0.00, 0.05, 0.05),
         ]
-        for (cx, cy), w, h in obstacles:
+        markerArray = MarkerArray()
+        for i, (ox, oy, length, width) in enumerate(obstacles_rect):
             marker = Marker()
             marker.header.frame_id = "odom"
             marker.type = Marker.CUBE
             marker.action = Marker.ADD
-            marker.scale.x = w
-            marker.scale.y = h
+            marker.scale.x = length
+            marker.scale.y = width
             marker.scale.z = 0.1
-            marker.color.a = 0.5
+            marker.color.a = 0.7
             marker.color.r = 1.0
             marker.color.g = 0.0
             marker.color.b = 0.0
-            marker.pose.position.x = cx
-            marker.pose.position.y = cy
+            marker.pose.orientation.w = 1.0
+            marker.pose.position.x = ox + length / 2
+            marker.pose.position.y = oy + width / 2
             marker.pose.position.z = 0.05
-            marker.id = idx
-            idx += 1
-            marker_array.markers.append(marker)
-        self.publisher.publish(marker_array)
-    """Superclass for all Gazebo environments."""
-
+            marker.id = i + 100000  # 防止与其他marker冲突
+            markerArray.markers.append(marker)
+        self.publisher.publish(markerArray)
+    # 加载障碍物信息
+    obstacles = load_obstacles('obstacle_2d_info.txt')
+    
     def __init__(self, launchfile, environment_dim):
         self.environment_dim = environment_dim # 激光雷达数据维度
         self.odom_x = 0
@@ -335,22 +352,57 @@ class GazeboEnv:
         self.change_goal()
 
         # Update RRT planner with obstacle information
+        # obstacles_rect = [
+        #     (-6.2, 3.8, 2.4, 2.4),  
+        #     (-2.7, -0.2, 1.4, 4.9),  
+        #     (-4.2, 1.3, 3.9, 1.4),  
+        #     (-4.2, -4.2, 3.4, 1.9),  
+        #     (-3.7, -2.7, 2.4, 1.9),  
+        #     (0.8, -3.2, 3.4, 1.4),   
+        #     (2.5, -3.2, 1.5, 3.9),   
+        #     (3.8, -4.2, 2.4, 0.9),  
+        #     (1.3, 1.5, 2.9, 2.2),    
+        #     (-7.2, -1.5, 4.2, 2.0),  
+        #     # 地图边界障碍物（左、右、上、下各加一条很细的障碍带）
+        #     (-5.0, -5.0, 10.0, 0.5),   # 下边界
+        #     (-5.0, 4.5, 10.0, 0.5),    # 上边界
+        #     (-5.0, -5.0, 0.5, 10.0),   # 左边界
+        #     (4.5, -5.0, 0.5, 10.0),    # 右边界
+        # ]
+
         obstacles_rect = [
-            (-6.2, 3.8, 2.4, 2.4),  
-            (-2.7, -0.2, 1.4, 4.9),  
-            (-4.2, 1.3, 3.9, 1.4),  
-            (-4.2, -4.2, 3.4, 1.9),  
-            (-3.7, -2.7, 2.4, 1.9),  
-            (0.8, -3.2, 3.4, 1.4),   
-            (2.5, -3.2, 1.5, 3.9),   
-            (3.8, -4.2, 2.4, 0.9),  
-            (1.3, 1.5, 2.9, 2.2),    
-            (-7.2, -1.5, 4.2, 2.0),  
-            # 地图边界障碍物（左、右、上、下各加一条很细的障碍带）
-            (-5.0, -5.0, 10.0, 0.5),   # 下边界
-            (-5.0, 4.5, 10.0, 0.5),    # 上边界
-            (-5.0, -5.0, 0.5, 10.0),   # 左边界
-            (4.5, -5.0, 0.5, 10.0),    # 右边界
+            (-3.41, 1.78, 2.52, 0.17),  
+            (-2.23, 0.39, 2.77, 0.17),  
+            (2.09, 2.95, 1.29, 0.17),  
+            (3.20, 2.13, 0.98, 0.17),  
+            (2.12, 2.13, 1.27, 0.17),  
+            (2.08, 2.13, 0.98, 0.17),   
+            (-3.42, -3.41, 1.99, 0.17),   
+            (-2.59, -3.41, 2.1, 0.17),  
+            (-3.39, -3.37, 2.1, 0.17),    
+            (1.51, -2.56, 1.77, 0.17),  
+            (3.13, -2.54, 2.6, 0.17),   
+            (-5.5, 5.35, 11.0, 0.16),    
+            (5.34, -5.5, 11.0, 0.16),   
+            (-5.5, -5.5, 11.0, 0.16), 
+            (-5.5, -5.5, 11.0, 0.16), 
+            (-0.45, 0.0, 0.9, 0.02), 
+            (0.44, -0.4, 0.03, 0.4), 
+            (-0.46, -0.4, 0.03, 0.4), 
+            (-0.44, -0.4, 0.89, 0.4), 
+            (-0.44, -0.4, 0.89, 0.4),
+            (-0.44, -0.4, 0.89, 0.4),
+            (-0.44, -0.4, 0.89, 0.4),
+            (-0.75, -0.4, 1.5, 0.8),
+            (-0.25, -0.2, 0.5, 0.4),
+            (-0.25, -0.2, 0.5, 0.4),
+            (-0.25, -0.2, 0.5, 0.4),
+            (-0.25, -0.2, 0.5, 0.4),
+            (-0.66, 0.36, 0.03, 0.03),
+            (-0.66, -0.40, 0.03, 0.03),
+            (-0.70, -0.40, 0.03, 0.03),
+            (-0.70, 0.36, 0.03, 0.03),
+            (0.00, 0.00, 0.05, 0.05),
         ]
 
         # 创建网格地图 
@@ -508,7 +560,7 @@ class GazeboEnv:
         # 收集旋转180°后的雷达数据
         rotated_laser_data = self.velodyne_data[:]
 
-        optimal_subgoal = self.find_optimal_subgoal(initial_laser_data, rotated_laser_data, planner)
+        optimal_subgoal = self.find_optimal_subgoal()
         self.publish_path(self.path, subgoal_point=optimal_subgoal)
         # 打印最优子目标点坐标
         if optimal_subgoal is not None:
@@ -527,7 +579,7 @@ class GazeboEnv:
         row_data.extend(rotated_laser_data)  # 旋转后雷达数据
 
         # 写入前检查是否已收集3000行数据（含表头共3001行）
-        csv_path = 'laser_data.csv'
+        csv_path = 'new_laser_data.csv'
         try:
             with open(csv_path, 'r') as f:
                 row_count = sum(1 for _ in f)
@@ -535,7 +587,7 @@ class GazeboEnv:
             row_count = 0
         # 第一行为表头，实际数据行数=row_count-1
         if row_count >= 3001:
-            print("已收集3000行数据，停止写入laser_data.csv。");
+            print("已收集3000行数据，停止写入new_laser_data.csv。");
             return
         with open(csv_path, 'a', newline='') as csvfile:
             writer = csv.writer(csvfile)
@@ -644,65 +696,17 @@ class GazeboEnv:
 
         robot_state = [distance, theta, 0.0, 0.0, local_goal_distance]
         state = np.append(laser_state, robot_state)
-        # 可视化check_pos障碍物
-        self.visualize_check_pos_obstacles()
+        self.visualize_obstacles()
         return state
 
-    def find_optimal_subgoal(self, *args, **kwargs):
-
-        if not self.path or len(self.path) < 2:
-            return None
-        sample_interval = 0.05  # 采样间隔（米）
-        sampled_points = []
-        # 沿路径每段采样
-        for seg_idx in range(len(self.path) - 1):
-            x0, y0 = self.path[seg_idx]
-            x1, y1 = self.path[seg_idx + 1]
-            dx = x1 - x0
-            dy = y1 - y0
-            seg_len = math.hypot(dx, dy)
-            n_samples = max(1, int(seg_len / sample_interval))
-            for i in range(n_samples):
-                t = i / n_samples
-                px = x0 + t * dx
-                py = y0 + t * dy
-                sampled_points.append((px, py))
-        sampled_points.append(self.path[-1])
-        # print("sampled_points:")
-        # for idx, pt in enumerate(sampled_points):
-        #     print(f"  {idx}: ({pt[0]:.3f}, {pt[1]:.3f})")
-        def to_robot_frame(point_x, point_y):
-            rel_x = point_x - self.odom_x
-            rel_y = point_y - self.odom_y
-            distance = math.sqrt(rel_x**2 + rel_y**2)
-            return distance
-
-        def line_collision(x0, y0, x1, y1, step=0.01):
-            # 采样直线上点，判断是否有点在障碍物内
-            dist = math.hypot(x1 - x0, y1 - y0)
-            n = max(2, int(dist / step))
-            for j in range(n + 1):
-                t = j / n
-                px = x0 + t * (x1 - x0)
-                py = y0 + t * (y1 - y0)
-                # print(f"Checking point ({px:.4f}, {py:.4f}) for collision")
-                if not check_pos(px, py):
-                    return True  # 有碰撞
-            return False  # 无碰撞
-
-        optimal_idx = -1
-        max_distance = 0
-        for i, (point_x, point_y) in enumerate(sampled_points):
-            # 判断当前点到采样点的连线是否与障碍物碰撞
-            if line_collision(self.odom_x, self.odom_y, point_x, point_y):
-                continue
-            distance = to_robot_frame(point_x, point_y)
-            if distance > max_distance:
-                max_distance = distance
-                optimal_idx = i
-        if optimal_idx == -1:
-            return tuple(self.path[0])
-        return sampled_points[optimal_idx]
+    def find_optimal_subgoal(self):
+        """
+        返回路径上倒数第二个点（即起点的下一个点）作为最优子目标点。
+        如果路径点不足2个，则返回None。
+        """
+        if self.path and len(self.path) >= 2:
+            return tuple(self.path[-2])
+        return None
 
     def change_goal(self):
         # 随机生成一个新的目标点，并确保它不会出现在障碍物上或地图外
