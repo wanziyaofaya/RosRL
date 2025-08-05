@@ -5,7 +5,6 @@ import subprocess
 import time
 from os import path
 import csv
-
 import numpy as np
 import rospy
 import sensor_msgs.point_cloud2 as pc2
