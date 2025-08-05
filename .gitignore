@@ -9,3 +9,4 @@ TD3/__pycache__/
 TD3/laser_data.csv
 TD3/new_laser_data.csv
 .vscode/
+TD3/laser_subgoal_net.pth
