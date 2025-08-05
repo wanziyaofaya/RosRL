@@ -19,7 +19,6 @@ from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from astar import AStar
 from utils import Grid
-from obstacle import load_obstacles
 from collision_utils import check_collision
 
 GOAL_REACHED_DIST = 0.3
@@ -131,8 +130,7 @@ class GazeboEnv:
             marker.id = i + 100000  # 防止与其他marker冲突
             markerArray.markers.append(marker)
         self.publisher.publish(markerArray)
-    # 加载障碍物信息
-    obstacles = load_obstacles('obstacle_2d_info.txt')
+
     
     def __init__(self, launchfile, environment_dim):
         self.environment_dim = environment_dim # 激光雷达数据维度
