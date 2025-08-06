@@ -68,68 +68,103 @@ def check_pos(x, y):
 
 
 class GazeboEnv:
-    def visualize_obstacles(self):
-        obstacles_rect = [
-    (-3.43, 1.76, 2.59, 0.21),  # 11*
-    (-2.28, 0.35, 0.21, 2.84),   # 13*
-    (2.06, 2.93, 1.34, 0.21),  # 15*
-    (2.06, 2.11, 0.21, 1.04),  # 16*
-    (2.09, 2.11, 1.34, 0.21),  # 17*
-    (3.22, 2.11, 0.21, 1.04), # 18*
+    # def visualize_obstacles(self):
+    #     obstacles_rect = [
+    #         (-3.43, 1.76, 2.59, 0.21),  # 11*
+    #         (-2.28, 0.35, 0.21, 2.84),   # 13*
+    #         (2.06, 2.93, 1.34, 0.21),  # 15*
+    #         (2.06, 2.11, 0.21, 1.04),  # 16*
+    #         (2.09, 2.11, 1.34, 0.21),  # 17*
+    #         (3.22, 2.11, 0.21, 1.04), # 18*
+    #         (-3.45, -3.37, 2.15, 0.21), # 26* 标准矩形
+    #         (1.48, -2.59, 1.84, 0.24), # 28*
+    #         (3.10, -2.57, 0.24, 2.59), # 29*
+    #         (-5.52, 5.33, 11.02, 0.17), # 6*
+    #         (-5.52, -5.52, 0.17, 11.02), # 7*
+    #         (-5.52, -5.52, 11.02, 0.17), # 8*
+    #         (5.33, -5.52, 0.17, 11.02), # 9*
+    #         (-4.68, 4.36, 0.30, 0.30), # fire_hydrant*
+    #         (4.30, -3.77, 0.99, 0.10), # back*
+    #         (5.19, -4.16, 0.11, 0.49),  # left_side*
+    #         (4.29, -4.16, 0.11, 0.49), # right_side*
+    #         # (4.31, -4.16, 0.97, 0.49), # bottom
+    #         # (4.31, -4.16, 0.97, 0.49), # top
+    #         # (4.31, -4.16, 0.97, 0.49), # low_shelf
+    #         # (4.31, -4.16, 0.97, 0.49), # high_shelf
+    #         # (-5.11, -0.96, 1.57, 0.87), # surface
+    #         (-3.72, -0.21, 0.13, 0.13), # front_left_leg*
+    #         (-3.72, -0.97, 0.13, 0.13), # front_right_leg*
+    #         (-5.07, -0.97, 0.13, 0.13), # back_right_leg*
+    #         (-5.07, -0.21, 0.13, 0.13), # back_left_leg*
+    #         (3.68, 0.74, 0.59, 0.49), # cardboard_box_0*
+    #         (-0.28, -4.20, 0.59, 0.49), # cardboard_box_1*
+    #         (-5.17, 2.74, 0.59, 0.49), # cardboard_box_2*
+    #         (-0.30, 3.76, 0.59, 0.49), # cardboard_box_3*
+    #     ]
+    #     obstacles_poly = [
+    #         ((-3.29, -3.41),(-2.28, -1.65),(-2.51, -1.58),(-3.42, -3.34)),  # 24
+    #                 ((-2.59, -1.66),(-1.49, -3.41),(-1.28, -3.23),(-2.38, -1.50)),  # 25
 
-    (-3.80, -3.39, 2.04, 0.21), # 24
-    (-3.00, -3.39, 2.14, 0.21), # 25
-    (-3.42, -3.39, 2.09, 0.21), # 26
-
-    (1.48, -2.59, 1.84, 0.24), # 28*
-    (3.10, -2.57, 0.24, 2.59), # 29*
-    (-5.52, 5.33, 11.02, 0.17), # 6*
-    (-5.52, -5.52, 0.17, 11.02), # 7*
-    (-5.52, -5.52, 11.02, 0.17), # 8*
-    (5.33, -5.52, 0.17, 11.02), # 9*
-
-    (-4.61, 4.52, 1.09, 1.09), # fire_hydrant
-    (4.30, -3.77, 0.99, 0.10), # back
-    (5.19, -4.16, 0.11, 0.49),  # left_side
-    (4.29, -4.16, 0.11, 0.49), # right_side
-
-    (4.31, -4.16, 0.97, 0.49), # bottom
-    (4.31, -4.16, 0.97, 0.49), # top
-    (4.31, -4.16, 0.97, 0.49), # low_shelf
-    (4.31, -4.16, 0.97, 0.49), # high_shelf
-
-    # (-5.11, -0.96, 1.57, 0.87), # surface
-    (-3.72, -0.21, 0.13, 0.13), # front_left_leg*
-    (-3.72, -0.97, 0.13, 0.13), # front_right_leg*
-    (-5.07, -0.97, 0.13, 0.13), # back_right_leg*
-    (-5.07, -0.21, 0.13, 0.13), # back_left_leg*
-
-    (3.68, 0.74, 0.59, 0.49), # cardboard_box_0*
-    (-0.28, -4.20, 0.59, 0.49), # cardboard_box_1*
-    (-5.17, 2.74, 0.59, 0.49), # cardboard_box_2*
-    (-0.30, 3.76, 0.59, 0.49), # cardboard_box_3*
-    ]
-        
-        markerArray = MarkerArray()
-        for i, (ox, oy, length, width) in enumerate(obstacles_rect):
-            marker = Marker()
-            marker.header.frame_id = "odom"
-            marker.type = Marker.CUBE
-            marker.action = Marker.ADD
-            marker.scale.x = length
-            marker.scale.y = width
-            marker.scale.z = 0.1
-            marker.color.a = 0.7
-            marker.color.r = 1.0
-            marker.color.g = 0.0
-            marker.color.b = 0.0
-            marker.pose.orientation.w = 1.0
-            marker.pose.position.x = ox + length / 2
-            marker.pose.position.y = oy + width / 2
-            marker.pose.position.z = 0.05
-            marker.id = i + 100000  # 防止与其他marker冲突
-            markerArray.markers.append(marker)
-        self.publisher.publish(markerArray)
+    #     ]
+    #     markerArray = MarkerArray()
+    #     # 可视化竖直矩形
+    #     for i, (ox, oy, length, width) in enumerate(obstacles_rect):
+    #         marker = Marker()
+    #         marker.header.frame_id = "odom"
+    #         marker.type = Marker.CUBE
+    #         marker.action = Marker.ADD
+    #         marker.scale.x = length
+    #         marker.scale.y = width
+    #         marker.scale.z = 0.1
+    #         marker.color.a = 0.7
+    #         marker.color.r = 1.0
+    #         marker.color.g = 0.0
+    #         marker.color.b = 0.0
+    #         marker.pose.orientation.w = 1.0
+    #         marker.pose.position.x = ox + length / 2
+    #         marker.pose.position.y = oy + width / 2
+    #         marker.pose.position.z = 0.05
+    #         marker.id = i + 100000  # 防止与其他marker冲突
+    #         markerArray.markers.append(marker)
+    #     # 可视化斜矩形（多边形）为红色填充矩形
+    #     for j, poly in enumerate(obstacles_poly):
+    #         # 计算中心点
+    #         xs = [p[0] for p in poly]
+    #         ys = [p[1] for p in poly]
+    #         center_x = sum(xs) / 4.0
+    #         center_y = sum(ys) / 4.0
+    #         # 计算长宽（用对角线距离近似）
+    #         width = np.linalg.norm(np.array(poly[0]) - np.array(poly[1]))
+    #         height = np.linalg.norm(np.array(poly[1]) - np.array(poly[2]))
+    #         # 计算旋转角度
+    #         dx = poly[1][0] - poly[0][0]
+    #         dy = poly[1][1] - poly[0][1]
+    #         yaw = np.arctan2(dy, dx)
+    #         # 构造marker
+    #         marker = Marker()
+    #         marker.header.frame_id = "odom"
+    #         marker.type = Marker.CUBE
+    #         marker.action = Marker.ADD
+    #         marker.scale.x = width
+    #         marker.scale.y = height
+    #         marker.scale.z = 0.1
+    #         marker.color.a = 0.7
+    #         marker.color.r = 1.0
+    #         marker.color.g = 0.0
+    #         marker.color.b = 0.0
+    #         # 设置旋转
+    #         from squaternion import Quaternion
+    #         quat = Quaternion.from_euler(0, 0, yaw)
+    #         marker.pose.orientation.x = quat.x
+    #         marker.pose.orientation.y = quat.y
+    #         marker.pose.orientation.z = quat.z
+    #         marker.pose.orientation.w = quat.w
+    #         marker.pose.position.x = center_x
+    #         marker.pose.position.y = center_y
+    #         marker.pose.position.z = 0.05
+    #         marker.id = 200000 + j
+    #         markerArray.markers.append(marker)
+    #     self.publisher.publish(markerArray)
 
     
     def __init__(self, launchfile, environment_dim):
@@ -365,10 +400,7 @@ class GazeboEnv:
     (2.09, 2.11, 1.34, 0.21),  # 17*
     (3.22, 2.11, 0.21, 1.04), # 18*
 
-    (-3.80, -3.39, 2.04, 0.21), # 24
-    (-3.00, -3.39, 2.14, 0.21), # 25
-    (-3.42, -3.39, 2.09, 0.21), # 26
-
+    (-3.45, -3.37, 2.15, 0.21), # 26* 标准矩形
     (1.48, -2.59, 1.84, 0.24), # 28*
     (3.10, -2.57, 0.24, 2.59), # 29*
     (-5.52, 5.33, 11.02, 0.17), # 6*
@@ -376,15 +408,15 @@ class GazeboEnv:
     (-5.52, -5.52, 11.02, 0.17), # 8*
     (5.33, -5.52, 0.17, 11.02), # 9*
 
-    (-4.61, 4.52, 1.09, 1.09), # fire_hydrant
-    (4.30, -3.77, 0.99, 0.10), # back
-    (5.19, -4.16, 0.11, 0.49),  # left_side
-    (4.29, -4.16, 0.11, 0.49), # right_side
+    (-4.68, 4.36, 0.30, 0.30), # fire_hydrant*
+    (4.30, -3.77, 0.99, 0.10), # back*
+    (5.19, -4.16, 0.11, 0.49),  # left_side*
+    (4.29, -4.16, 0.11, 0.49), # right_side*
 
-    (4.31, -4.16, 0.97, 0.49), # bottom
-    (4.31, -4.16, 0.97, 0.49), # top
-    (4.31, -4.16, 0.97, 0.49), # low_shelf
-    (4.31, -4.16, 0.97, 0.49), # high_shelf
+    # (4.31, -4.16, 0.97, 0.49), # bottom
+    # (4.31, -4.16, 0.97, 0.49), # top
+    # (4.31, -4.16, 0.97, 0.49), # low_shelf
+    # (4.31, -4.16, 0.97, 0.49), # high_shelf
 
     # (-5.11, -0.96, 1.57, 0.87), # surface
     (-3.72, -0.21, 0.13, 0.13), # front_left_leg*
@@ -396,6 +428,11 @@ class GazeboEnv:
     (-0.28, -4.20, 0.59, 0.49), # cardboard_box_1*
     (-5.17, 2.74, 0.59, 0.49), # cardboard_box_2*
     (-0.30, 3.76, 0.59, 0.49), # cardboard_box_3*
+    ]
+        
+        obstacles_poly = [
+        ((-3.29, -3.41),(-2.28, -1.65),(-2.51, -1.58),(-3.42, -3.34)),  # 24
+        ((-2.59, -1.66),(-1.49, -3.41),(-1.28, -3.23),(-2.38, -1.50)),  # 25
     ]
 
         # 创建网格地图 
@@ -435,18 +472,31 @@ class GazeboEnv:
                     if 0 <= x < width and 0 <= y < height:
                         grid[x][y] = 1
 
+        for poly in obstacles_poly:
+            # 获取多边形的边界框
+            xs = [p[0] for p in poly]
+            ys = [p[1] for p in poly]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            # 转为网格坐标
+            grid_min_x, grid_min_y = world_to_grid(min_x, min_y)
+            grid_max_x, grid_max_y = world_to_grid(max_x, max_y)
+            grid_min_x = max(0, min(grid_min_x, width-1))
+            grid_max_x = max(0, min(grid_max_x, width-1))
+            grid_min_y = max(0, min(grid_min_y, height-1))
+            grid_max_y = max(0, min(grid_max_y, height-1))
+            # 遍历边界框内所有网格点，判断是否在多边形内
+            for x in range(grid_min_x, grid_max_x+1):
+                for y in range(grid_min_y, grid_max_y+1):
+                    wx = x * resolution - 5.0
+                    wy = y * resolution - 5.0
+                    from collision_utils import point_in_poly
+                    if point_in_poly(wx, wy, poly):
+                        grid[x][y] = 1
+
         # 创建网格环境
         env = Grid(width, height)
         env.grid = grid
-
-        # 打印所有障碍物网格点的x和y索引
-        # print("障碍物网格点 (x, y):")
-        # line = []
-        # for x in range(width):
-        #     for y in range(height):
-        #         if grid[x][y] == 1:
-        #             line.append(f"({x},{y})")
-        # print(' '.join(line))
         
         # 将连续坐标转换为网格坐标
         start = world_to_grid(self.odom_x, self.odom_y)
@@ -689,7 +739,7 @@ class GazeboEnv:
 
         robot_state = [distance, theta, 0.0, 0.0, local_goal_distance]
         state = np.append(laser_state, robot_state)
-        self.visualize_obstacles()
+        # self.visualize_obstacles()
         return state
 
     def find_optimal_subgoal(self):
