@@ -9,7 +9,7 @@ from numpy import inf
 from torch.utils.tensorboard import SummaryWriter
 
 from replay_buffer import ReplayBuffer
-from velodyne_astar import GazeboEnv
+from velodyne_astar_360 import GazeboEnv
 import csv
 
 # 评估函数，用于测试训练好的网络性能
